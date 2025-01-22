@@ -1,0 +1,5 @@
+-- Drop Portuguese tables
+DROP TABLE IF EXISTS cotacoes CASCADE;
+DROP TABLE IF EXISTS veiculos CASCADE;
+DROP TABLE IF EXISTS fornecedores CASCADE;
+DROP TABLE IF EXISTS pecas CASCADE;

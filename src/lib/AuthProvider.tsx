@@ -31,6 +31,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw error;
   }
 
+  async function signOut() {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -40,7 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, signIn }}>
+    <AuthContext.Provider value={{ user, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   );

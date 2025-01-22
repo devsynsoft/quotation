@@ -1,10 +1,12 @@
 import React from 'react';
 import { Loader2, Car, Lock, Mail } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useNavigate } from 'react-router-dom';
 
 export function Login() {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
+  const navigate = useNavigate();
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -22,6 +24,9 @@ export function Login() {
       });
       if (signInError) throw signInError;
       if (!data.user) throw new Error('No user data returned');
+
+      // Redirecionar para /quotations após login bem-sucedido
+      navigate('/quotations');
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -36,7 +41,7 @@ export function Login() {
         <div className="max-w-md">
           <div className="flex items-center space-x-3 mb-8">
             <Car className="w-10 h-10" />
-            <h1 className="text-3xl font-bold">Auto Parts Quotation</h1>
+            <h1 className="text-3xl font-bold">Smart Cotações</h1>
           </div>
           <p className="text-xl mb-4">
             Gerencie suas cotações de peças automotivas de forma simples e eficiente

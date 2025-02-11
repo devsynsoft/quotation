@@ -23,6 +23,7 @@ interface SupplierSelectionProps {
     modelo: string;
     ano: string;
     placa?: string;
+    chassis?: string;
   };
   parts: any[];
   images?: string[];
@@ -73,7 +74,7 @@ const SupplierSelection: React.FC<SupplierSelectionProps> = ({
         template = template.replace(/{vehicle_brand}/g, vehicleDetails.marca || '')
                          .replace(/{vehicle_model}/g, vehicleDetails.modelo || '')
                          .replace(/{vehicle_year}/g, vehicleDetails.ano || '')
-                         .replace(/{vehicle_chassis}/g, vehicleDetails.placa || '');
+                         .replace(/{vehicle_chassis}/g, vehicleDetails.chassis || '');
 
         // Formata a lista de peças
         const partsText = parts.map(part => 
@@ -181,7 +182,8 @@ ${part.painting_hours > 0 ? `Horas Pintura: ${part.painting_hours}` : ''}`
         return { 
           areaCode: supplier.area_code,
           phone: supplier.phone,
-          message
+          message,
+          imageUrl: coverImage // Adiciona a imagem de capa selecionada
         };
       });
 

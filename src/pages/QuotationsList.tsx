@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { Loader2, ChevronRight, Search } from 'lucide-react';
+import { Loader2, ChevronRight, Search, Trash2 } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 
 interface Vehicle {
   brand: string;
@@ -100,6 +101,38 @@ const QuotationsList = () => {
     return () => clearTimeout(timer);
   }, [search]);
 
+  const handleDelete = async (e: React.MouseEvent, quotationId: string) => {
+    e.stopPropagation(); // Previne a navegação ao clicar no botão de excluir
+    
+    if (!window.confirm('Tem certeza que deseja excluir esta cotação?')) {
+      return;
+    }
+
+    try {
+      // Primeiro exclui os registros relacionados em quotation_requests
+      const { error: requestsError } = await supabase
+        .from('quotation_requests')
+        .delete()
+        .eq('quotation_id', quotationId);
+
+      if (requestsError) throw requestsError;
+
+      // Depois exclui a cotação
+      const { error: quotationError } = await supabase
+        .from('quotations')
+        .delete()
+        .eq('id', quotationId);
+
+      if (quotationError) throw quotationError;
+
+      toast.success('Cotação excluída com sucesso');
+      loadQuotations(); // Recarrega a lista
+    } catch (err) {
+      console.error('Erro ao excluir cotação:', err);
+      toast.error('Erro ao excluir cotação');
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center p-8">
@@ -191,6 +224,13 @@ const QuotationsList = () => {
                 {quotation.status === 'pending' ? 'Pendente' :
                  quotation.status === 'completed' ? 'Finalizada' : 'Em andamento'}
               </span>
+              <button
+                onClick={(e) => handleDelete(e, quotation.id)}
+                className="p-1 hover:bg-red-100 rounded-full transition-colors"
+                title="Excluir cotação"
+              >
+                <Trash2 className="h-5 w-5 text-red-500" />
+              </button>
               <ChevronRight className="h-5 w-5 text-gray-400" />
             </div>
           </div>

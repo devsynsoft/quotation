@@ -1,10 +1,11 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Search, X } from 'lucide-react';
+import { Plus, Search, X, Trash2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { Database } from '../../lib/database.types';
 import { AddSupplierModal } from './AddSupplierModal';
 import { useAuth } from '../../hooks/useAuth';
+import { toast } from 'react-hot-toast';
 
 type Supplier = Database['public']['Tables']['suppliers']['Row'];
 
@@ -136,6 +137,41 @@ export function SupplierList() {
       setSuppliers(prev => [...prev, supplier]);
     }
     setSelectedSupplier(undefined);
+  }
+
+  async function handleDelete(e: React.MouseEvent, supplierId: string) {
+    e.stopPropagation(); // Previne a abertura do modal de edição
+
+    if (!window.confirm('Tem certeza que deseja excluir este fornecedor?')) {
+      return;
+    }
+
+    try {
+      // Primeiro verifica se há cotações relacionadas
+      const { data: quotationRequests } = await supabase
+        .from('quotation_requests')
+        .select('id')
+        .eq('supplier_id', supplierId);
+
+      if (quotationRequests && quotationRequests.length > 0) {
+        toast.error('Não é possível excluir este fornecedor pois existem cotações associadas a ele');
+        return;
+      }
+
+      // Se não houver cotações, pode excluir o fornecedor
+      const { error } = await supabase
+        .from('suppliers')
+        .delete()
+        .eq('id', supplierId);
+
+      if (error) throw error;
+
+      toast.success('Fornecedor excluído com sucesso');
+      fetchSuppliers(); // Recarrega a lista
+    } catch (err) {
+      console.error('Erro ao excluir fornecedor:', err);
+      toast.error('Erro ao excluir fornecedor');
+    }
   }
 
   const filteredSuppliers = suppliers.filter(supplier => {
@@ -327,13 +363,22 @@ export function SupplierList() {
                   )}
                 </>
               )}
-              <div className="mt-3 flex flex-wrap gap-2">
-                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                  {partsTypeLabels[supplier.parts_type as keyof typeof partsTypeLabels]}
-                </span>
-                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                  {specializationLabels[supplier.specialization as keyof typeof specializationLabels]}
-                </span>
+              <div className="mt-3 flex flex-wrap gap-2 justify-between items-center">
+                <div className="flex flex-wrap gap-2">
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                    {partsTypeLabels[supplier.parts_type as keyof typeof partsTypeLabels]}
+                  </span>
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                    {specializationLabels[supplier.specialization as keyof typeof specializationLabels]}
+                  </span>
+                </div>
+                <button
+                  onClick={(e) => handleDelete(e, supplier.id)}
+                  className="p-1 hover:bg-red-100 rounded-full transition-colors"
+                  title="Excluir fornecedor"
+                >
+                  <Trash2 className="h-5 w-5 text-red-500" />
+                </button>
               </div>
             </div>
           ))}

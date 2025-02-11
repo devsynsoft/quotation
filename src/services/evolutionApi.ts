@@ -42,12 +42,14 @@ export async function sendWhatsAppMessage({
   areaCode,
   phone,
   message,
-  userId
+  userId,
+  imageUrl
 }: {
   areaCode: string;
   phone: string;
   message: string;
   userId?: string;
+  imageUrl?: string;
 }): Promise<{ error?: Error }> {
   try {
     const config = await getWhatsAppConfig(userId || (await supabase.auth.getUser()).data.user?.id || '');
@@ -69,34 +71,64 @@ export async function sendWhatsAppMessage({
 
     // Normaliza a URL base removendo barras duplicadas
     const baseUrl = config.evolution_api_url.replace(/\/+$/, '');
-    const url = `${baseUrl}/message/sendText/${config.instance_name}`;
 
-    const payload = {
-      number: fullPhone,
-      text: message
-    };
-
-    const response = await fetch(url, {
+    // Primeiro envia a mensagem de texto
+    const textResponse = await fetch(`${baseUrl}/message/sendText/${config.instance_name}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'apikey': config.evolution_api_key
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        number: fullPhone,
+        text: message
+      })
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => response.text());
-      console.error('Resposta da API:', {
-        status: response.status,
-        statusText: response.statusText,
+    if (!textResponse.ok) {
+      const errorData = await textResponse.json().catch(() => textResponse.text());
+      console.error('Resposta da API (texto):', {
+        status: textResponse.status,
+        statusText: textResponse.statusText,
         error: errorData
       });
-      throw new Error(`Erro ao enviar mensagem: ${response.statusText}`);
+      throw new Error(`Erro ao enviar mensagem: ${textResponse.statusText}`);
     }
 
-    const data = await response.json();
-    console.log('Mensagem enviada com sucesso:', data);
+    // Se houver imagem, envia depois da mensagem
+    if (imageUrl) {
+      console.log('Tentando enviar imagem:', {
+        url: imageUrl,
+        phone: fullPhone
+      });
+
+      const mediaResponse = await fetch(`${baseUrl}/message/sendMedia/${config.instance_name}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': config.evolution_api_key
+        },
+        body: JSON.stringify({
+          number: fullPhone,
+          media: imageUrl,
+          mediatype: 'image',
+          caption: 'Foto do veículo'
+        })
+      });
+
+      const mediaData = await mediaResponse.json().catch(() => null);
+      console.log('Resposta do envio da mídia:', mediaData);
+
+      if (!mediaResponse.ok) {
+        console.error('Erro ao enviar imagem:', {
+          status: mediaResponse.status,
+          statusText: mediaResponse.statusText,
+          data: mediaData
+        });
+        throw new Error(`Erro ao enviar imagem: ${mediaResponse.statusText}`);
+      }
+    }
+
     return {};
   } catch (error) {
     console.error('Erro ao enviar mensagem:', error);
@@ -105,7 +137,7 @@ export async function sendWhatsAppMessage({
 }
 
 export async function sendBulkWhatsAppMessages(
-  messages: { areaCode: string; phone: string; message: string }[],
+  messages: { areaCode: string; phone: string; message: string; imageUrl?: string }[],
   userId: string
 ): Promise<{ success: boolean; errors: Error[] }> {
   const errors: Error[] = [];

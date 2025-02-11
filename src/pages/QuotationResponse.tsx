@@ -286,7 +286,7 @@ const QuotationResponse = () => {
                   type="text"
                   value={response.supplier_name}
                   onChange={e => setResponse(prev => ({ ...prev, supplier_name: e.target.value }))}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                  className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm h-12"
                   required
                 />
               </div>
@@ -298,7 +298,7 @@ const QuotationResponse = () => {
                   type="tel"
                   value={response.supplier_phone}
                   onChange={e => setResponse(prev => ({ ...prev, supplier_phone: e.target.value }))}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                  className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm h-12"
                   required
                 />
               </div>
@@ -344,7 +344,7 @@ const QuotationResponse = () => {
                             step="0.01"
                             value={part.unit_price || ''}
                             onChange={e => handlePartChange(index, 'unit_price', parseFloat(e.target.value) || 0)}
-                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                            className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm h-12"
                             required={part.available}
                           />
                           <p className="mt-2 text-sm text-gray-500">
@@ -361,7 +361,7 @@ const QuotationResponse = () => {
                           value={part.notes || ''}
                           onChange={e => handlePartChange(index, 'notes', e.target.value)}
                           placeholder={part.available ? "Observações sobre a peça" : "Motivo da indisponibilidade"}
-                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                          className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm h-12"
                         />
                       </div>
                     </div>
@@ -382,7 +382,7 @@ const QuotationResponse = () => {
                     type="text"
                     value={response.delivery_time || ''}
                     onChange={e => setResponse(prev => ({ ...prev, delivery_time: e.target.value }))}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                    className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm h-12"
                     placeholder="Ex: 5 dias úteis"
                   />
                 </div>
@@ -403,7 +403,7 @@ const QuotationResponse = () => {
                   value={response.notes || ''}
                   onChange={e => setResponse(prev => ({ ...prev, notes: e.target.value }))}
                   rows={3}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                  className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
                 />
               </div>
             </div>

@@ -104,6 +104,7 @@ export function QuotationDetails() {
     name: string;
     state: string;
   } | null>(null);
+  const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null);
 
   useEffect(() => {
     // Carrega o usuário atual
@@ -265,7 +266,7 @@ export function QuotationDetails() {
         .replace(/{marca}/g, quotation.vehicle.brand)
         .replace(/{modelo}/g, quotation.vehicle.model)
         .replace(/{ano}/g, quotation.vehicle.year)
-        .replace(/{placa}/g, quotation.vehicle.chassis || '');
+        .replace(/{chassi}/g, quotation.vehicle.chassis || '');
     }
 
     // Substitui a lista de peças
@@ -279,6 +280,10 @@ export function QuotationDetails() {
     return message;
   };
 
+  const handleImageSelect = (image: string) => {
+    setSelectedImageUrl(selectedImageUrl === image ? null : image);
+  };
+
   const resendToSupplier = async (request: QuotationRequest) => {
     if (!quotation) {
       toast.error('Dados da cotação não encontrados');
@@ -290,7 +295,6 @@ export function QuotationDetails() {
 
       let message = formatMessage();
       
-      // Adiciona o link único para esta solicitação
       message = message.replace(
         /{quotation_link}/g, 
         `${window.location.origin}/quotation-response/${quotation.id}/${request.id}`
@@ -300,22 +304,32 @@ export function QuotationDetails() {
         throw new Error(`Fornecedor ${request.supplier.name} não tem DDD ou telefone cadastrado`);
       }
 
-      // Log da chamada
       const logMessage = `Enviando mensagem para ${request.supplier.name}:
 Telefone: ${request.supplier.area_code}${request.supplier.phone}
 Mensagem:
-${message}`;
+${message}
+${selectedImageUrl ? `\nImagem: ${selectedImageUrl}` : ''}`;
       setApiLog(prev => prev + '\n\n' + logMessage);
 
+      // Envia a mensagem de texto primeiro
       await sendBulkWhatsAppMessages([{
         areaCode: request.supplier.area_code,
         phone: request.supplier.phone,
         message
       }], user.id);
 
+      // Se houver imagem selecionada, envia em seguida
+      if (selectedImageUrl) {
+        await sendBulkWhatsAppMessages([{
+          areaCode: request.supplier.area_code,
+          phone: request.supplier.phone,
+          message: '',
+          imageUrl: selectedImageUrl
+        }], user.id);
+      }
+
       setApiLog(prev => prev + '\n✅ Mensagem enviada com sucesso!');
 
-      // Atualiza o status da solicitação
       await supabase
         .from('quotation_requests')
         .update({
@@ -325,8 +339,6 @@ ${message}`;
         .eq('id', request.id);
 
       toast.success(`Mensagem reenviada para ${request.supplier.name}`);
-
-      // Recarrega os detalhes
       await loadQuotationDetails();
     } catch (err: any) {
       console.error('Erro ao enviar mensagem:', err);
@@ -354,14 +366,13 @@ ${message}`;
         throw new Error('Nenhum fornecedor tem DDD e telefone cadastrados');
       }
 
-      const messages = validRequests.map(request => {
-        // Adiciona o link único para cada solicitação
+      // Envia a mensagem de texto primeiro para todos
+      const textMessages = validRequests.map(request => {
         const messageWithLink = message.replace(
           /{quotation_link}/g, 
           `${window.location.origin}/quotation-response/${quotation.id}/${request.id}`
         );
 
-        // Log da chamada
         const logMessage = `Enviando mensagem para ${request.supplier.name}:
 Telefone: ${request.supplier.area_code}${request.supplier.phone}
 Mensagem:
@@ -375,8 +386,19 @@ ${messageWithLink}`;
         };
       });
 
-      await sendBulkWhatsAppMessages(messages, user.id);
-      
+      await sendBulkWhatsAppMessages(textMessages, user.id);
+
+      // Se houver imagem selecionada, envia para todos em seguida
+      if (selectedImageUrl) {
+        const imageMessages = validRequests.map(request => ({
+          areaCode: request.supplier.area_code,
+          phone: request.supplier.phone,
+          message: '',
+          imageUrl: selectedImageUrl
+        }));
+
+        await sendBulkWhatsAppMessages(imageMessages, user.id);
+      }
       setApiLog(prev => prev + '\n✅ Mensagens enviadas com sucesso!');
 
       // Atualiza o status de todas as solicitações
@@ -545,7 +567,10 @@ ${messageWithLink}`;
                   <img
                     src={image}
                     alt={`Imagem ${index + 1}`}
-                    className="w-full h-32 object-cover rounded-lg"
+                    className={`w-full h-32 object-cover rounded-lg cursor-pointer ${
+                      selectedImageUrl === image ? 'ring-2 ring-blue-500' : ''
+                    }`}
+                    onClick={() => handleImageSelect(image)}
                     onError={(e) => {
                       console.error('Erro ao carregar imagem:', e);
                       e.currentTarget.src = '/placeholder-image.jpg';

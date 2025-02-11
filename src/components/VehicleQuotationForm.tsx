@@ -817,7 +817,8 @@ const VehicleQuotationForm = () => {
               marca: vehicle.brand,
               modelo: vehicle.model,
               ano: vehicle.year,
-              placa: vehicle.plate
+              placa: vehicle.plate,
+              chassis: vehicle.chassis
             }}
             parts={parts}
             images={vehicle.images}

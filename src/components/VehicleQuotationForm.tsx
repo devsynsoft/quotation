@@ -6,6 +6,7 @@ import { useAuth } from '../hooks/useAuth';
 import { Trash2, Plus, Upload, FileText, Loader2 } from 'lucide-react';
 import SupplierSelection from './SupplierSelection';
 import { QuotationPartForm, QuotationPart } from './quotations/QuotationPartForm';
+import { expandAbbreviations } from '../utils/textUtils';
 
 interface Part {
   operation: string;
@@ -97,52 +98,48 @@ const VehicleQuotationForm = () => {
 
     // Processar cada linha
     const newParts = dataLines.map(line => {
-      // Divide a linha em partes
-      const parts = line.split(/\s+/);
-      
-      // Se não tiver partes suficientes, ignora a linha
-      if (parts.length < 6) return null;
-
       // Extrai a operação (pode ser "TROCAR" ou "TROCAR /PINTAR")
-      let operation = parts[0];
-      let currentIndex = 1;
-      
-      if (parts[1] === '/PINTAR') {
-        operation = 'TROCAR/PINTAR';
-        currentIndex = 2;
+      let operation = "TROCAR"; // valor padrão
+      if (line.includes("TROCAR/PINTAR")) {
+        operation = "TROCAR/PINTAR";
       }
 
-      // Pega o código
-      const code = parts[currentIndex];
-      currentIndex++;
+      // Encontra o índice do (I) que marca o início da descrição
+      const descStartIndex = line.indexOf("(I)");
+      if (descStartIndex === -1) return null; // Se não encontrar (I), ignora a linha
 
-      // Pega a descrição (tudo entre o código e o tipo da peça)
-      let description = '';
-      while (currentIndex < parts.length && !['Genuína', 'Nova', 'Usada'].includes(parts[currentIndex])) {
-        description += parts[currentIndex] + ' ';
-        currentIndex++;
-      }
+      // Extrai o código (tudo antes do (I), removendo espaços)
+      const code = line.substring(0, descStartIndex).replace(/\s+/g, '');
+
+      // Pega o resto da linha após o (I)
+      let restOfLine = line.substring(descStartIndex);
+
+      // Divide o resto da linha em partes
+      const parts = restOfLine.split(/\s+/).filter(p => p);
+
+      // Encontra o índice do tipo de peça (Genuína, Nova, Usada)
+      const typeIndex = parts.findIndex(part => ['Genuína', 'Nova', 'Usada'].includes(part));
+      if (typeIndex === -1) return null;
+
+      // Pega a descrição (tudo entre (I) e o tipo da peça)
+      const description = parts.slice(0, typeIndex).join(' ');
+
+      // Expande abreviações na descrição
+      const expandedDescription = expandAbbreviations(description);
 
       // Pega o tipo da peça
-      const partType = parts[currentIndex];
-      currentIndex++;
+      const partType = parts[typeIndex];
 
-      // Pega a quantidade
-      const quantity = parseInt(parts[currentIndex]) || 1;
-      currentIndex++;
+      // Pega a quantidade (número após o tipo)
+      const quantity = parseInt(parts[typeIndex + 1]) || 1;
 
-      // Avança até encontrar o último número (horas pintura)
-      while (currentIndex < parts.length - 1) {
-        currentIndex++;
-      }
-
-      // Pega as horas de pintura (último número da linha)
+      // Pega as horas de pintura (último número da linha, se existir)
       const paintingHours = parseFloat(parts[parts.length - 1]) || 0;
       
       return {
         operation: operation,
         code: code,
-        description: description.trim(),
+        description: expandedDescription.trim(),
         part_type: partType === 'Genuína' ? 'genuine' : 
                   partType === 'Usada' ? 'used' : 'new',
         quantity: quantity,

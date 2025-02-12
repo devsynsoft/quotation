@@ -133,11 +133,17 @@ const VehicleQuotationForm = () => {
       // Pega o tipo da peça
       const partType = parts[typeIndex];
 
-      // Pega a quantidade (número após o tipo)
-      const quantity = parseInt(parts[typeIndex + 1]) || 1;
+      // Procura números após o tipo da peça
+      const numbers = parts.slice(typeIndex + 1)
+        .map(part => part.replace(',', '.')) // Substitui vírgula por ponto
+        .map(parseFloat)
+        .filter(num => !isNaN(num));
+
+      // Extrai quantidade, preço unitário e preço total
+      const [quantity = 1, unitPrice = 0, totalPrice = 0] = numbers;
 
       // Pega as horas de pintura (último número da linha, se existir)
-      const paintingHours = parseFloat(parts[parts.length - 1]) || 0;
+      const paintingHours = numbers[numbers.length - 1] || 0;
       
       return {
         operation: operation,
@@ -149,7 +155,7 @@ const VehicleQuotationForm = () => {
         painting_hours: paintingHours,
         labor_hours: 0,
         labor_cost: 0,
-        part_cost: 0
+        part_cost: totalPrice || (unitPrice * quantity) // Usa o preço total ou calcula baseado no unitário
       };
     }).filter((part): part is Part => part !== null);
     

@@ -26,6 +26,10 @@ interface Part {
   unit_price?: number;
   total_price?: number;
   discount_percentage?: number;
+  part_cost?: number;
+  purchase_date?: string;
+  purchase_price?: number;
+  purchased?: boolean;
 }
 
 interface Supplier {
@@ -137,6 +141,48 @@ export function QuotationDetails() {
 
       if (quotationError) throw quotationError;
 
+      // Carrega as ordens de compra para esta cotação
+      const { data: purchaseOrdersData, error: purchaseOrdersError } = await supabase
+        .from('purchase_orders')
+        .select(`
+          id,
+          created_at,
+          items:purchase_order_items(
+            id,
+            quotation_part_index,
+            unit_price,
+            quantity
+          )
+        `)
+        .eq('quotation_id', id);
+
+      if (purchaseOrdersError) throw purchaseOrdersError;
+
+      // Atualiza as informações de compra nas peças
+      const quotationWithPurchaseInfo = {
+        ...quotationData,
+        parts: quotationData.parts.map((part: Part, index: number) => {
+          const purchaseOrder = purchaseOrdersData?.find(order => 
+            order.items?.some(item => item.quotation_part_index === index)
+          );
+          const purchaseItem = purchaseOrder?.items?.find(item => 
+            item.quotation_part_index === index
+          );
+
+          if (purchaseItem) {
+            return {
+              ...part,
+              purchased: true,
+              purchase_date: purchaseOrder.created_at,
+              purchase_price: purchaseItem.unit_price
+            };
+          }
+          return part;
+        })
+      };
+
+      setQuotation(quotationWithPurchaseInfo);
+
       // Carrega as solicitações de cotação com dados dos fornecedores
       const { data: requestsData, error: requestsError } = await supabase
         .from('quotation_requests')
@@ -151,7 +197,6 @@ export function QuotationDetails() {
         throw requestsError;
       }
 
-      setQuotation(quotationData);
       setRequests(requestsData || []);
     } catch (err: any) {
       console.error('Erro ao carregar detalhes da cotação:', err);
@@ -425,104 +470,90 @@ ${messageWithLink}`;
     }
   };
 
-  const handlePartSelect = (partDescription: string, requestId: string, partIndex: number) => {
-    setSelectedParts(prev => ({
-      ...prev,
-      [partDescription]: { requestId, partIndex }
-    }));
+  const handlePartSelect = (description: string, requestId: string, partIndex: number) => {
+    setSelectedParts(prev => {
+      // Se já está selecionado o mesmo item, desseleciona
+      if (prev[description]?.requestId === requestId) {
+        const { [description]: removed, ...rest } = prev;
+        return rest;
+      }
+      
+      // Caso contrário, seleciona o novo item
+      return {
+        ...prev,
+        [description]: { requestId, partIndex }
+      };
+    });
   };
 
-  const createPurchaseOrders = async () => {
-    if (!Object.keys(selectedParts).length) {
-      toast.error('Selecione pelo menos uma peça para gerar a ordem de compra');
-      return;
-    }
+  const handleCreatePurchaseOrder = async () => {
+    if (!quotation || !company) return;
+
+    setCreatingOrder(true);
 
     try {
-      setCreatingOrder(true);
-
-      // Agrupa as peças por fornecedor
-      const ordersBySupplier: Record<string, {
-        parts: {
-          description: string;
-          quantity: number;
-          unit_price: number;
-          total_price: number;
-          notes?: string;
-          quotation_request_id: string;
-        }[];
-        total_amount: number;
-        supplier_id: string;
-        delivery_time?: string;
-      }> = {};
-
-      Object.entries(selectedParts).forEach(([description, { requestId, partIndex }]) => {
-        const request = quotationRequests.find(r => r.id === requestId);
-        if (!request?.response_data) return;
-
-        const part = request.response_data.parts[partIndex];
-        if (!part || !part.available) return;
-
-        const supplierId = request.supplier_id;
-        if (!ordersBySupplier[supplierId]) {
-          ordersBySupplier[supplierId] = {
-            parts: [],
-            total_amount: 0,
-            supplier_id: supplierId,
-            delivery_time: request.response_data.delivery_time
-          };
+      // Agrupa as peças selecionadas por fornecedor
+      const partsBySupplier = Object.entries(selectedParts).reduce((acc: Record<string, any[]>, [partId, part]) => {
+        if (!acc[part.requestId]) {
+          acc[part.requestId] = [];
         }
+        acc[part.requestId].push({ ...part, id: partId });
+        return acc;
+      }, {});
 
-        ordersBySupplier[supplierId].parts.push({
-          description: part.description,
-          quantity: part.quantity,
-          unit_price: part.unit_price,
-          total_price: part.total_price,
-          notes: part.notes,
-          quotation_request_id: request.id
-        });
+      // Cria uma ordem de compra para cada fornecedor
+      for (const [requestId, parts] of Object.entries(partsBySupplier)) {
+        const request = requests.find(r => r.id === requestId);
+        if (!request?.response_data) continue;
 
-        ordersBySupplier[supplierId].total_amount += part.total_price;
-      });
-
-      // Cria as ordens de compra
-      for (const order of Object.values(ordersBySupplier)) {
-        const { data: purchaseOrder, error: orderError } = await supabase
+        // Cria a ordem de compra
+        const { data: orderData, error: orderError } = await supabase
           .from('purchase_orders')
           .insert({
-            quotation_id: id,
-            supplier_id: order.supplier_id,
-            total_amount: order.total_amount,
-            delivery_time: order.delivery_time
+            quotation_id: quotation.id,
+            supplier_id: request.supplier_id,
+            status: 'pending',
+            total_amount: parts.reduce((total, part) => {
+              const responsePart = request.response_data!.parts[part.partIndex];
+              return total + (responsePart.total_price || 0);
+            }, 0)
           })
           .select()
           .single();
 
         if (orderError) throw orderError;
 
+        // Cria os itens da ordem de compra
+        const orderItems = parts.map(part => {
+          const responsePart = request.response_data!.parts[part.partIndex];
+          return {
+            purchase_order_id: orderData.id,
+            part_description: responsePart.description,
+            quantity: responsePart.quantity,
+            unit_price: responsePart.unit_price,
+            total_price: responsePart.total_price,
+            quotation_part_index: part.partIndex
+          };
+        });
+
         const { error: itemsError } = await supabase
           .from('purchase_order_items')
-          .insert(
-            order.parts.map(part => ({
-              purchase_order_id: purchaseOrder.id,
-              part_description: part.description,
-              quantity: part.quantity,
-              unit_price: part.unit_price,
-              total_price: part.total_price,
-              notes: part.notes,
-              quotation_request_id: part.quotation_request_id
-            }))
-          );
+          .insert(orderItems);
 
         if (itemsError) throw itemsError;
       }
 
-      toast.success('Ordens de compra geradas com sucesso!');
-      loadPurchaseOrders(); // Recarrega as ordens
-      setSelectedParts({}); // Limpa as seleções
-    } catch (err) {
-      console.error('Erro ao criar ordens de compra:', err);
-      toast.error('Erro ao gerar ordens de compra');
+      toast.success('Ordem de compra criada com sucesso!');
+      
+      // Recarrega os dados
+      await loadQuotationDetails();
+      await loadPurchaseOrders();
+      
+      // Limpa as seleções
+      setSelectedParts({});
+    } catch (error: any) {
+      console.error('Erro ao criar ordem de compra:', error);
+      toast.error('Erro ao criar ordem de compra');
     } finally {
       setCreatingOrder(false);
     }
@@ -625,38 +656,66 @@ ${messageWithLink}`;
                   <th scope="col" className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Horas Pintura
                   </th>
+                  <th scope="col" className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Status
+                  </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {quotation.parts.map((part, index) => (
-                  <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                  <tr key={index} className={part.purchased ? 'bg-green-50' : ''}>
                     <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                       {part.operation || 'TROCAR'}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                       {part.code}
                     </td>
-                    <td className="px-3 py-2 text-sm text-gray-900">
+                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                       {part.description}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                       {part.part_type === 'genuine' ? 'Genuína' :
                        part.part_type === 'used' ? 'Usada' : 'Nova'}
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-sm text-center text-gray-900">
+                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-center">
                       {part.quantity}
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-sm text-right text-gray-900">
-                      {part.unit_price?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right">
+                      {part.part_cost ? (
+                        part.part_cost.toLocaleString('pt-BR', { 
+                          style: 'currency', 
+                          currency: 'BRL' 
+                        })
+                      ) : '-'}
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-sm text-right text-gray-900">
-                      {part.total_price?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right">
+                      {part.part_cost ? (
+                        (part.part_cost * part.quantity).toLocaleString('pt-BR', { 
+                          style: 'currency', 
+                          currency: 'BRL' 
+                        })
+                      ) : '-'}
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-sm text-center text-gray-900">
-                      {part.discount_percentage?.toFixed(2)}%
+                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-center">
+                      {part.discount_percentage || '-'}
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-sm text-center text-gray-900">
-                      {part.painting_hours?.toFixed(2)}
+                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-center">
+                      {part.painting_hours || '0,00'}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
+                      {part.purchased ? (
+                        <div className="flex items-center justify-center space-x-1">
+                          <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                          <div className="text-xs text-gray-600">
+                            <div>Comprada em: {new Date(part.purchase_date).toLocaleDateString('pt-BR')}</div>
+                            <div>Valor: {part.purchase_price?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-gray-500">Pendente</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -743,50 +802,66 @@ ${messageWithLink}`;
                   </div>
 
                   <div id={`supplier-${request.id}`} className="p-4" style={{ display: 'none' }}>
-                    {request.response_data?.parts.map((part, index) => (
-                      <div key={index} className="mb-4 last:mb-0">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <div className="flex items-center">
-                              {part.available && (
-                                <input
-                                  type="radio"
-                                  name={`part-${part.description}`}
-                                  checked={selectedParts[part.description]?.requestId === request.id}
-                                  onChange={() => handlePartSelect(part.description, request.id, index)}
-                                  className="mr-2"
-                                />
-                              )}
-                              <div>
-                                <h4 className="font-medium">{part.description}</h4>
-                                <p className="text-sm text-gray-500">
-                                  Quantidade: {part.quantity}
-                                </p>
+                    {request.response_data?.parts.map((part, index) => {
+                      const quotationPart = quotation?.parts[index];
+                      const isSelected = selectedParts[quotationPart?.description || '']?.requestId === request.id;
+                      const isPurchased = quotationPart?.purchased;
+                      
+                      // Calcula a diferença de preço com a regulagem
+                      const regulationPrice = quotationPart?.part_cost || 0;
+                      const priceDifference = part.unit_price - regulationPrice;
+                      const percentageDifference = regulationPrice > 0 
+                        ? ((priceDifference / regulationPrice) * 100)
+                        : 0;
+
+                      return (
+                        <div key={index} className="mb-4 last:mb-0">
+                          <div className="flex items-start">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              disabled={!part.available || isPurchased}
+                              onChange={() => handlePartSelect(quotationPart?.description || '', request.id, index)}
+                              className="mt-1 h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 disabled:opacity-50"
+                            />
+                            <div className="ml-3 flex-grow">
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <p className="text-sm font-medium">{part.description}</p>
+                                  <p className="text-sm text-gray-500">Quantidade: {part.quantity}</p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-sm font-medium">
+                                    {part.unit_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} /unidade
+                                  </p>
+                                  {regulationPrice > 0 && (
+                                    <p className={`text-xs ${priceDifference > 0 ? 'text-red-500' : 'text-green-500'}`}>
+                                      {priceDifference > 0 ? '+' : ''}
+                                      {priceDifference.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                      {' '}
+                                      ({priceDifference > 0 ? '+' : ''}
+                                      {percentageDifference.toFixed(1)}%)
+                                    </p>
+                                  )}
+                                  <p className="text-sm text-gray-500">
+                                    Total: {part.total_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                  </p>
+                                </div>
                               </div>
+                              {!part.available && (
+                                <p className="text-sm text-red-500 mt-1">Peça não disponível</p>
+                              )}
+                              {isPurchased && (
+                                <p className="text-sm text-green-600 mt-1">Peça já comprada</p>
+                              )}
+                              {part.notes && (
+                                <p className="text-sm text-gray-500 mt-1">{part.notes}</p>
+                              )}
                             </div>
-                            {part.notes && (
-                              <p className="text-sm text-gray-600 mt-1">
-                                Obs: {part.notes}
-                              </p>
-                            )}
                           </div>
-                          {part.available ? (
-                            <div className="text-right">
-                              <p className="font-medium">
-                                R$ {part.unit_price.toFixed(2)} / unidade
-                              </p>
-                              <p className="text-sm text-gray-500">
-                                Total: R$ {part.total_price.toFixed(2)}
-                              </p>
-                            </div>
-                          ) : (
-                            <span className="text-red-500 text-sm">
-                              Peça não disponível
-                            </span>
-                          )}
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
 
                     {request.response_data?.delivery_time && (
                       <p className="text-sm text-gray-600 mt-4">
@@ -812,7 +887,7 @@ ${messageWithLink}`;
                 Comparar Cotações
               </Link>
               <button
-                onClick={createPurchaseOrders}
+                onClick={handleCreatePurchaseOrder}
                 disabled={creatingOrder || !Object.keys(selectedParts).length}
                 className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -907,6 +982,7 @@ ${messageWithLink}`;
                   <input
                     type="checkbox"
                     checked={selectedParts[index] || false}
+                    disabled={part.purchased}
                     onChange={(e) => handlePartSelect(part.description, request.id, index)}
                     className="h-4 w-4 text-blue-600 rounded border-gray-300"
                   />

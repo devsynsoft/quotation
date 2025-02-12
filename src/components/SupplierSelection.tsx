@@ -217,6 +217,20 @@ ${part.painting_hours > 0 ? `Horas Pintura: ${part.painting_hours}` : ''}`
     return true;
   });
 
+  const handleSelectAll = () => {
+    const allSelected = filteredSuppliers.every(supplier => 
+      selectedSuppliers.includes(supplier.id)
+    );
+    
+    if (allSelected) {
+      // Se todos já estão selecionados, desmarca todos
+      setSelectedSuppliers([]);
+    } else {
+      // Senão, seleciona todos os fornecedores filtrados
+      setSelectedSuppliers(filteredSuppliers.map(s => s.id));
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Seleção da Foto de Capa */}
@@ -337,53 +351,66 @@ ${part.painting_hours > 0 ? `Horas Pintura: ${part.painting_hours}` : ''}`
         </div>
 
         {/* Lista de Fornecedores */}
-        {loading ? (
-          <div className="flex justify-center items-center h-32">
-            <Loader2 className="w-8 h-8 animate-spin text-gray-500" />
+        <div className="mt-4 space-y-4">
+          <div className="flex justify-between items-center">
+            <h3 className="text-lg font-medium">Fornecedores</h3>
+            <button
+              onClick={handleSelectAll}
+              type="button"
+              className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              Selecionar Todos
+            </button>
           </div>
-        ) : filteredSuppliers.length > 0 ? (
-          <div className="space-y-4">
-            {filteredSuppliers.map(supplier => (
-              <div
-                key={supplier.id}
-                className={`flex items-center justify-between p-4 border rounded-lg cursor-pointer transition-colors ${
-                  selectedSuppliers.includes(supplier.id)
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-200 hover:border-blue-300'
-                }`}
-                onClick={() => toggleSupplier(supplier.id)}
-              >
-                <div>
-                  <p className="font-medium">{supplier.name}</p>
-                  <p className="text-sm text-gray-500">
-                    {supplier.city}, {supplier.state} ({supplier.area_code}) {supplier.phone}
-                  </p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={selectedSuppliers.includes(supplier.id)}
-                  onChange={() => toggleSupplier(supplier.id)}
-                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-center text-gray-500 py-4">
-            Nenhum fornecedor encontrado com os filtros selecionados
-          </p>
-        )}
 
-        {/* Botão de Enviar */}
-        <div className="flex justify-end mt-6">
-          <button
-            onClick={sendQuotationRequests}
-            disabled={selectedSuppliers.length === 0 || sending}
-            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Send className="w-4 h-4 mr-2" />
-            {sending ? 'Enviando...' : `Enviar para ${selectedSuppliers.length} fornecedor${selectedSuppliers.length !== 1 ? 'es' : ''}`}
-          </button>
+          {loading ? (
+            <div className="flex justify-center items-center h-32">
+              <Loader2 className="w-8 h-8 animate-spin text-gray-500" />
+            </div>
+          ) : filteredSuppliers.length > 0 ? (
+            <div className="space-y-4">
+              {filteredSuppliers.map(supplier => (
+                <div
+                  key={supplier.id}
+                  className={`flex items-center justify-between p-4 border rounded-lg cursor-pointer transition-colors ${
+                    selectedSuppliers.includes(supplier.id)
+                      ? 'border-blue-500 bg-blue-50'
+                      : 'border-gray-200 hover:border-blue-300'
+                  }`}
+                  onClick={() => toggleSupplier(supplier.id)}
+                >
+                  <div>
+                    <p className="font-medium">{supplier.name}</p>
+                    <p className="text-sm text-gray-500">
+                      {supplier.city}, {supplier.state} ({supplier.area_code}) {supplier.phone}
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={selectedSuppliers.includes(supplier.id)}
+                    onChange={() => toggleSupplier(supplier.id)}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-center text-gray-500 py-4">
+              Nenhum fornecedor encontrado com os filtros selecionados
+            </p>
+          )}
+
+          {/* Botão de Enviar */}
+          <div className="flex justify-end mt-6">
+            <button
+              onClick={sendQuotationRequests}
+              disabled={selectedSuppliers.length === 0 || sending}
+              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Send className="w-4 h-4 mr-2" />
+              {sending ? 'Enviando...' : `Enviar para ${selectedSuppliers.length} fornecedor${selectedSuppliers.length !== 1 ? 'es' : ''}`}
+            </button>
+          </div>
         </div>
       </div>
     </div>

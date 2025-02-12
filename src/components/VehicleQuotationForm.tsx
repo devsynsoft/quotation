@@ -104,15 +104,18 @@ const VehicleQuotationForm = () => {
         operation = "TROCAR/PINTAR";
       }
 
+      // Remove a operação da linha para processar o resto
+      let processedLine = line.replace(/^TROCAR(\/PINTAR)?/, '').trim();
+
       // Encontra o índice do (I) que marca o início da descrição
-      const descStartIndex = line.indexOf("(I)");
+      const descStartIndex = processedLine.indexOf("(I)");
       if (descStartIndex === -1) return null; // Se não encontrar (I), ignora a linha
 
       // Extrai o código (tudo antes do (I), removendo espaços)
-      const code = line.substring(0, descStartIndex).replace(/\s+/g, '');
+      const code = processedLine.substring(0, descStartIndex).replace(/\s+/g, '');
 
       // Pega o resto da linha após o (I)
-      let restOfLine = line.substring(descStartIndex);
+      let restOfLine = processedLine.substring(descStartIndex);
 
       // Divide o resto da linha em partes
       const parts = restOfLine.split(/\s+/).filter(p => p);

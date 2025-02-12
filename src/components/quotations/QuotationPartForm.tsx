@@ -41,22 +41,56 @@ export function QuotationPartForm({ parts, onChange, mode }: QuotationPartFormPr
   }
 
   function handleBulkTextChange(text: string) {
-    // Exemplo: TROCAR 71103T5NM50 (I) ACAB DIR FAROL NEBL (f) Genuína 1
     const parts = text.split('\n')
       .filter(line => line.trim())
       .map(line => {
-        const match = line.match(/^(TROCAR(?:\/PINTAR)?)\s+(\S+)\s+\(([^)]+)\)\s+([^(]+)\s+\(([^)]+)\)\s+(\d+)/);
+        // Normaliza o texto removendo espaços extras e caracteres especiais
+        const normalizedLine = line.trim()
+          .replace(/\s+/g, ' ')
+          .replace(/[\u200B-\u200D\uFEFF]/g, '');
+
+        // Diferentes formatos de operação
+        const operationRegex = /^(TROCAR(?:\/PINTAR)?|PINTAR|RECUPERAR)/i;
+        const operationMatch = normalizedLine.match(operationRegex);
+        if (!operationMatch) return null;
+
+        const operation = operationMatch[1].toUpperCase();
+
+        // Remove a operação do início e processa o resto
+        const restOfLine = normalizedLine.slice(operation.length).trim();
+
+        // Tenta extrair código, tipo e descrição
+        const partRegex = /^(\S+)\s*(?:\(([^)]+)\))?\s*([^(]+)(?:\s*\(([^)]+)\))?\s*(\d+)?/;
+        const match = restOfLine.match(partRegex);
         if (!match) return null;
 
-        const [, operation, code, type1, description, partType, quantity] = match;
+        const [, code, type1, description, partType, quantity] = match;
+
+        // Determina o tipo da peça
+        let finalPartType = 'new'; // default
+        if (partType) {
+          if (partType.toLowerCase().includes('genuína') || partType.toLowerCase().includes('genuina')) {
+            finalPartType = 'genuine';
+          } else if (partType.toLowerCase().includes('usada')) {
+            finalPartType = 'used';
+          }
+        }
+
+        // Calcula horas de pintura baseado na operação
+        let paintingHours = 0;
+        if (operation.includes('PINTAR')) {
+          paintingHours = 1.17; // Padrão para pintura
+        } else if (operation === 'RECUPERAR') {
+          paintingHours = 2.34; // Dobro para recuperação
+        }
+
         return {
           operation: operation.trim(),
           code: code.trim(),
           description: description.trim(),
-          part_type: partType.toLowerCase().includes('genuína') ? 'genuine' : 
-                    partType.toLowerCase().includes('usada') ? 'used' : 'new',
+          part_type: finalPartType,
           quantity: parseInt(quantity) || 1,
-          painting_hours: operation.toLowerCase().includes('pintar') ? 1.17 : 0
+          painting_hours: paintingHours
         };
       })
       .filter((part): part is QuotationPart => part !== null);

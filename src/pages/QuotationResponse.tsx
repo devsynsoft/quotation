@@ -277,97 +277,126 @@ const QuotationResponse = () => {
 
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Dados do Fornecedor */}
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-6 bg-blue-50 p-4 rounded-lg border-2 border-blue-200">
               <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Seu Nome
+                <label className="block text-sm font-semibold text-blue-900 mb-2">
+                  Nome do Fornecedor *
                 </label>
                 <input
                   type="text"
-                  value={response.supplier_name}
+                  value={response.supplier_name || ''}
                   onChange={e => setResponse(prev => ({ ...prev, supplier_name: e.target.value }))}
-                  className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm h-12"
+                  className="mt-1 block w-full rounded-md border-2 border-blue-200 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 px-5 text-[16px] h-12 bg-white"
                   required
+                  placeholder="Digite seu nome completo"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Seu Telefone
+                <label className="block text-sm font-semibold text-blue-900 mb-2">
+                  Telefone do Fornecedor *
                 </label>
                 <input
                   type="tel"
-                  value={response.supplier_phone}
+                  value={response.supplier_phone || ''}
                   onChange={e => setResponse(prev => ({ ...prev, supplier_phone: e.target.value }))}
-                  className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm h-12"
+                  className="mt-1 block w-full rounded-md border-2 border-blue-200 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 px-5 text-[16px] h-12 bg-white"
                   required
+                  placeholder="(00) 00000-0000"
                 />
               </div>
             </div>
 
             {/* Lista de Peças */}
-            <div>
-              <h2 className="text-lg font-medium mb-4">Peças Solicitadas</h2>
-              <div className="space-y-4">
-                {response.parts.map((part, index) => (
-                  <div key={index} className="border rounded-lg p-4">
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">
-                          Peça
-                        </label>
-                        <p className="mt-1">{part.description}</p>
-                        <p className="text-sm text-gray-500">
-                          Quantidade: {part.quantity}
-                        </p>
-                        <div className="mt-2">
-                          <label className="inline-flex items-center">
-                            <input
-                              type="checkbox"
-                              checked={part.available}
-                              onChange={e => handlePartChange(index, 'available', e.target.checked)}
-                              className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
-                            />
-                            <span className="ml-2 text-sm text-gray-700">
-                              Peça disponível
-                            </span>
-                          </label>
-                        </div>
-                      </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Peça
+                    </th>
+                    <th scope="col" className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Qtde
+                    </th>
+                    <th scope="col" className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Preço Un.
+                    </th>
+                    <th scope="col" className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Total
+                    </th>
+                    <th scope="col" className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Disponível
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {response.parts.map((part, index) => (
+                    <tr key={index} className={`${
+                      part.available === true ? 'bg-green-50' : 
+                      part.available === false ? 'bg-red-50' : ''
+                    }`}>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                        {part.description}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-center">
+                        {part.quantity}
+                      </td>
                       {part.available && (
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700">
-                            Preço Unitário
-                          </label>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                           <input
                             type="number"
                             min="0"
                             step="0.01"
                             value={part.unit_price || ''}
                             onChange={e => handlePartChange(index, 'unit_price', parseFloat(e.target.value) || 0)}
-                            className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm h-12"
-                            required={part.available}
+                            className="w-full px-2 py-1 text-right rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring focus:ring-primary focus:ring-opacity-50 disabled:bg-gray-100 disabled:cursor-not-allowed"
                           />
-                          <p className="mt-2 text-sm text-gray-500">
-                            Total: R$ {part.total_price?.toFixed(2)}
-                          </p>
-                        </div>
+                        </td>
                       )}
-                      <div className="sm:col-span-2">
-                        <label className="block text-sm font-medium text-gray-700">
-                          Observações
-                        </label>
-                        <input
-                          type="text"
-                          value={part.notes || ''}
-                          onChange={e => handlePartChange(index, 'notes', e.target.value)}
-                          placeholder={part.available ? "Observações sobre a peça" : "Motivo da indisponibilidade"}
-                          className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm h-12"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                      {part.available && (
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                          <p className="text-right">{part.total_price?.toFixed(2)}</p>
+                        </td>
+                      )}
+                      {!part.available && (
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-center">
+                          -
+                        </td>
+                      )}
+                      {!part.available && (
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-center">
+                          -
+                        </td>
+                      )}
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
+                        <div className="flex justify-center items-center space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => handlePartChange(index, 'available', true)}
+                            className={`px-3 py-1 rounded-l-md text-xs font-medium ${
+                              part.available === true
+                                ? 'bg-green-600 text-white'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                          >
+                            Sim
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handlePartChange(index, 'available', false)}
+                            className={`px-3 py-1 rounded-r-md text-xs font-medium ${
+                              part.available === false
+                                ? 'bg-red-600 text-white'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                          >
+                            Não
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
 
             {/* Informações Gerais */}
@@ -382,7 +411,7 @@ const QuotationResponse = () => {
                     type="text"
                     value={response.delivery_time || ''}
                     onChange={e => setResponse(prev => ({ ...prev, delivery_time: e.target.value }))}
-                    className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm h-12"
+                    className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-primary focus:ring focus:ring-primary focus:ring-opacity-50 px-5 py-2"
                     placeholder="Ex: 5 dias úteis"
                   />
                 </div>
@@ -395,6 +424,7 @@ const QuotationResponse = () => {
                   </p>
                 </div>
               </div>
+
               <div className="mt-4">
                 <label className="block text-sm font-medium text-gray-700">
                   Observações Gerais
@@ -403,13 +433,14 @@ const QuotationResponse = () => {
                   value={response.notes || ''}
                   onChange={e => setResponse(prev => ({ ...prev, notes: e.target.value }))}
                   rows={3}
-                  className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                  className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-primary focus:ring focus:ring-primary focus:ring-opacity-50 px-5 py-2"
+                  placeholder="Adicione observações relevantes sobre a cotação..."
                 />
               </div>
             </div>
 
             {/* Botão de Envio */}
-            <div className="flex justify-end">
+            <div className="mt-6 flex justify-end">
               <button
                 type="submit"
                 disabled={submitting}

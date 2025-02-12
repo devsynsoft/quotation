@@ -100,12 +100,12 @@ const VehicleQuotationForm = () => {
     const newParts = dataLines.map(line => {
       // Extrai a operação (pode ser "TROCAR" ou "TROCAR /PINTAR")
       let operation = "TROCAR"; // valor padrão
-      if (line.includes("TROCAR/PINTAR")) {
+      if (line.includes("TROCAR /PINTAR") || line.includes("TROCAR/PINTAR")) {
         operation = "TROCAR/PINTAR";
       }
 
       // Remove a operação da linha para processar o resto
-      let processedLine = line.replace(/^TROCAR(\/PINTAR)?/, '').trim();
+      let processedLine = line.replace(/^TROCAR(\s*\/\s*PINTAR)?/, '').trim();
 
       // Encontra o índice do (I) que marca o início da descrição
       const descStartIndex = processedLine.indexOf("(I)");
@@ -135,8 +135,11 @@ const VehicleQuotationForm = () => {
 
       // Procura números após o tipo da peça
       const numbers = parts.slice(typeIndex + 1)
-        .map(part => part.replace(',', '.')) // Substitui vírgula por ponto
-        .map(parseFloat)
+        .map(part => {
+          // Remove pontos de milhar e substitui vírgula por ponto para decimais
+          const cleanNumber = part.replace(/\./g, '').replace(',', '.');
+          return parseFloat(cleanNumber);
+        })
         .filter(num => !isNaN(num));
 
       // Extrai quantidade, preço unitário e preço total

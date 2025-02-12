@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Search, X, Trash2 } from 'lucide-react';
+import { Plus, Search, X, Trash2, Loader2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { Database } from '../../lib/database.types';
 import { AddSupplierModal } from './AddSupplierModal';
@@ -31,6 +31,8 @@ export function SupplierList() {
     city: '',
     specialization: ''
   });
+  const [importing, setImporting] = React.useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const partsTypeLabels = {
     new: 'Apenas peças novas',
@@ -174,6 +176,77 @@ export function SupplierList() {
     }
   }
 
+  const handleImportCSV = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+    const reader = new FileReader();
+
+    reader.onload = async (e) => {
+      try {
+        const text = e.target?.result as string;
+        const rows = text.split('\n');
+        const headers = rows[0].toLowerCase().split(',');
+
+        const suppliers = rows.slice(1).map((row) => {
+          const values = row.split(',');
+          const supplier: any = {};
+
+          headers.forEach((header, index) => {
+            let value = values[index]?.trim();
+            
+            // Remove aspas se existirem
+            if (value?.startsWith('"') && value?.endsWith('"')) {
+              value = value.slice(1, -1);
+            }
+
+            // Mapeia os headers do CSV para os campos do banco
+            const fieldMap: { [key: string]: string } = {
+              'nome': 'name',
+              'telefone': 'phone',
+              'ddd': 'area_code',
+              'estado': 'state',
+              'cidade': 'city',
+              'rua': 'street',
+              'numero': 'number',
+              'complemento': 'complement',
+              'bairro': 'neighborhood',
+              'cep': 'zip_code',
+              'tipo_pecas': 'parts_type',
+              'especializacao': 'specialization'
+            };
+
+            const field = fieldMap[header] || header;
+            supplier[field] = value;
+          });
+
+          return supplier;
+        });
+
+        // Insere os fornecedores no banco
+        const { error } = await supabase
+          .from('suppliers')
+          .insert(suppliers.filter(s => s.name && s.phone)); // Só insere se tiver pelo menos nome e telefone
+
+        if (error) throw error;
+
+        toast.success(`${suppliers.length} fornecedores importados com sucesso!`);
+        fetchSuppliers(); // Recarrega a lista
+      } catch (error) {
+        console.error('Erro ao importar CSV:', error);
+        toast.error('Erro ao importar fornecedores. Verifique o formato do arquivo.');
+      } finally {
+        setImporting(false);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = ''; // Limpa o input
+        }
+      }
+    };
+
+    reader.readAsText(file);
+  };
+
   const filteredSuppliers = suppliers.filter(supplier => {
     if (filters.area_code && supplier.area_code !== filters.area_code) {
       return false;
@@ -197,16 +270,42 @@ export function SupplierList() {
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Fornecedores</h1>
-        <button
-          onClick={() => {
-            setSelectedSupplier(undefined);
-            setIsModalOpen(true);
-          }}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center space-x-2"
-        >
-          <Plus className="w-5 h-5" />
-          <span>Novo Fornecedor</span>
-        </button>
+        <div className="flex gap-2">
+          <input
+            type="file"
+            accept=".csv"
+            onChange={handleImportCSV}
+            ref={fileInputRef}
+            className="hidden"
+            id="csv-upload"
+          />
+          <label
+            htmlFor="csv-upload"
+            className={`inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${importing ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            {importing ? (
+              <>
+                <Loader2 className="animate-spin -ml-1 mr-2 h-5 w-5 text-gray-500" />
+                Importando...
+              </>
+            ) : (
+              <>
+                <Plus className="-ml-1 mr-2 h-5 w-5 text-gray-500" />
+                Importar CSV
+              </>
+            )}
+          </label>
+          <button
+            onClick={() => {
+              setSelectedSupplier(undefined);
+              setIsModalOpen(true);
+            }}
+            className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+          >
+            <Plus className="-ml-1 mr-2 h-5 w-5" />
+            Novo Fornecedor
+          </button>
+        </div>
       </div>
 
       {/* Filtros */}

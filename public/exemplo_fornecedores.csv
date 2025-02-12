@@ -1,0 +1,4 @@
+nome,telefone,ddd,estado,cidade,rua,numero,complemento,bairro,cep,tipo_pecas,especializacao
+Exemplo Auto Peças,99999-9999,11,SP,São Paulo,Rua das Peças,123,Sala 2,Centro,01234-567,new,mechanical
+Peças Usadas LTDA,88888-8888,11,SP,São Paulo,Avenida das Peças,456,,Jardim Europa,04567-890,used,bodywork
+Multi Peças,77777-7777,11,SP,São Paulo,Rua dos Faróis,789,Galpão 3,Vila Mariana,03456-789,all,lights

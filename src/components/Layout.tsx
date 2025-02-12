@@ -8,7 +8,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const { signOut } = useAuth();
+  const { user, signOut } = useAuth();
 
   const handleLogout = async () => {
     try {
@@ -80,7 +80,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </div>
 
           {/* Logout Button */}
-          <div className="border-t pt-4">
+          <div className="border-t pt-4 space-y-2">
+            <div className="px-4 py-2">
+              <p className="text-sm text-gray-600">Logado como:</p>
+              <p className="text-sm font-medium text-gray-800 truncate" title={user?.email || ''}>
+                {user?.email}
+              </p>
+            </div>
             <button
               onClick={handleLogout}
               className="flex items-center w-full px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg"

@@ -63,7 +63,6 @@ export function SupplierList() {
       let query = supabase
         .from('suppliers')
         .select('*')
-        .eq('user_id', user.id)
         .order('name');
 
       if (filters.area_code) {
@@ -186,18 +185,20 @@ export function SupplierList() {
     reader.onload = async (e) => {
       try {
         const text = e.target?.result as string;
-        const rows = text.split('\n');
-        const headers = rows[0].toLowerCase().split(',');
+        // Divide por quebras de linha e remove linhas vazias
+        const rows = text.split(/\r?\n/).filter(line => line.trim());
+        // Remove caracteres especiais dos headers e converte para lowercase
+        const headers = rows[0].toLowerCase().split(',').map(h => h.trim().replace(/[\r\n]/g, ''));
 
         const suppliers = rows.slice(1).map((row) => {
           const values = row.split(',');
           const supplier: any = {};
 
           headers.forEach((header, index) => {
-            let value = values[index]?.trim();
+            let value = values[index]?.trim() || '';
             
             // Remove aspas se existirem
-            if (value?.startsWith('"') && value?.endsWith('"')) {
+            if (value.startsWith('"') && value.endsWith('"')) {
               value = value.slice(1, -1);
             }
 
@@ -218,24 +219,30 @@ export function SupplierList() {
             };
 
             const field = fieldMap[header] || header;
+            if (field === 'specialization' && !value) {
+              value = 'all'; // valor padrão
+            }
+            if (field === 'parts_type' && !value) {
+              value = 'all'; // valor padrão
+            }
             supplier[field] = value;
           });
 
           return supplier;
-        });
+        }).filter(s => s.name && s.phone); // Filtra apenas fornecedores com nome e telefone
 
         // Insere os fornecedores no banco
         const { error } = await supabase
           .from('suppliers')
-          .insert(suppliers.filter(s => s.name && s.phone)); // Só insere se tiver pelo menos nome e telefone
+          .insert(suppliers);
 
         if (error) throw error;
 
         toast.success(`${suppliers.length} fornecedores importados com sucesso!`);
         fetchSuppliers(); // Recarrega a lista
-      } catch (error) {
+      } catch (error: any) {
         console.error('Erro ao importar CSV:', error);
-        toast.error('Erro ao importar fornecedores. Verifique o formato do arquivo.');
+        toast.error(error.message || 'Erro ao importar fornecedores. Verifique o formato do arquivo.');
       } finally {
         setImporting(false);
         if (fileInputRef.current) {

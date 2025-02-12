@@ -11,6 +11,22 @@ interface Part {
   total_price: number;
   notes?: string;
   available: boolean;
+  purchased?: boolean;
+  purchase_date?: Date;
+  purchase_price?: number;
+}
+
+interface QuotationPart {
+  description: string;
+  quantity: number;
+  part_cost: number;
+  operation?: string;
+  code?: string;
+}
+
+interface Quotation {
+  id: string;
+  parts: QuotationPart[];
 }
 
 interface QuotationRequest {
@@ -37,7 +53,27 @@ export function QuotationComparison() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState<QuotationRequest[]>([]);
+  const [quotation, setQuotation] = useState<Quotation | null>(null);
   const [uniqueParts, setUniqueParts] = useState<string[]>([]);
+  const [sortBy, setSortBy] = useState<'parts' | 'total'>('parts');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+
+  // Função para ordenar os requests
+  const sortRequests = (requests: QuotationRequest[]) => {
+    return [...requests].sort((a, b) => {
+      if (sortBy === 'parts') {
+        const partsA = a.response_data?.parts.filter(p => p.available).length || 0;
+        const partsB = b.response_data?.parts.filter(p => p.available).length || 0;
+        return sortOrder === 'desc' ? partsB - partsA : partsA - partsB;
+      } else {
+        const totalA = a.response_data?.total_price || 0;
+        const totalB = b.response_data?.total_price || 0;
+        return sortOrder === 'desc' ? totalB - totalA : totalA - totalB;
+      }
+    });
+  };
+
+  const sortedRequests = sortRequests(requests);
 
   useEffect(() => {
     if (id) {
@@ -47,6 +83,34 @@ export function QuotationComparison() {
 
   const loadQuotationRequests = async () => {
     try {
+      // Carrega a cotação original com os valores de regulagem
+      const { data: quotationData, error: quotationError } = await supabase
+        .from('quotations')
+        .select('*, parts')
+        .eq('id', id)
+        .single();
+
+      if (quotationError) throw quotationError;
+      setQuotation(quotationData);
+
+      // Carrega as ordens de compra para esta cotação
+      const { data: purchaseOrdersData, error: purchaseOrdersError } = await supabase
+        .from('purchase_orders')
+        .select(`
+          id,
+          created_at,
+          items:purchase_order_items(
+            id,
+            quotation_part_index,
+            unit_price,
+            part_description
+          )
+        `)
+        .eq('quotation_id', id);
+
+      if (purchaseOrdersError) throw purchaseOrdersError;
+
+      // Carrega as solicitações de cotação
       const { data, error } = await supabase
         .from('quotation_requests')
         .select(`
@@ -58,7 +122,32 @@ export function QuotationComparison() {
 
       if (error) throw error;
 
-      setRequests(data || []);
+      // Adiciona informações de compra nas peças
+      const requestsWithPurchaseInfo = data?.map(request => {
+        if (request.response_data?.parts) {
+          request.response_data.parts = request.response_data.parts.map(part => {
+            const purchaseOrder = purchaseOrdersData?.find(order => 
+              order.items?.some(item => item.part_description === part.description)
+            );
+            const purchaseItem = purchaseOrder?.items?.find(item => 
+              item.part_description === part.description
+            );
+
+            if (purchaseItem) {
+              return {
+                ...part,
+                purchased: true,
+                purchase_date: purchaseOrder.created_at,
+                purchase_price: purchaseItem.unit_price
+              };
+            }
+            return part;
+          });
+        }
+        return request;
+      });
+
+      setRequests(requestsWithPurchaseInfo || []);
 
       // Extrai todas as peças únicas
       const parts = new Set<string>();
@@ -78,6 +167,32 @@ export function QuotationComparison() {
 
   const findPartInRequest = (request: QuotationRequest, description: string) => {
     return request.response_data?.parts.find(p => p.description === description);
+  };
+
+  const findRegulationPart = (description: string) => {
+    return quotation?.parts.find(p => p.description === description);
+  };
+
+  // Calcula a diferença em relação ao valor de regulagem
+  const calculateDifference = (quotedPrice: number, regulationPrice: number) => {
+    const difference = quotedPrice - regulationPrice;
+    const percentage = (difference / regulationPrice) * 100;
+    
+    return {
+      value: difference,
+      percentage,
+      isAbove: difference > 0
+    };
+  };
+
+  // Formata o número para o padrão brasileiro (. para milhar e , para decimal)
+  const formatBRL = (value: number) => {
+    return value.toLocaleString('pt-BR', { 
+      style: 'currency', 
+      currency: 'BRL',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).replace(/^R\$\s*/, ''); // Remove o "R$ " pois já adicionamos manualmente
   };
 
   if (loading) {
@@ -102,75 +217,139 @@ export function QuotationComparison() {
         </div>
 
         <div className="bg-white shadow rounded-lg overflow-hidden">
-          <div className="p-6">
-            <h1 className="text-2xl font-bold mb-6">Comparação de Cotações</h1>
+          <div className="p-4 border-b border-gray-200">
+            <div className="flex justify-between items-center">
+              <h2 className="text-lg font-medium">Comparação de Cotações</h2>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 bg-gray-50 p-2 rounded-lg">
+                  <label className="text-sm text-gray-600">Ordenar por:</label>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as 'parts' | 'total')}
+                    className="text-sm bg-white border border-gray-300 rounded-md py-1 px-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="parts">Peças Respondidas</option>
+                    <option value="total">Valor Total</option>
+                  </select>
+                  <select
+                    value={sortOrder}
+                    onChange={(e) => setSortOrder(e.target.value as 'asc' | 'desc')}
+                    className="text-sm bg-white border border-gray-300 rounded-md py-1 px-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="desc">Maior → Menor</option>
+                    <option value="asc">Menor → Maior</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
 
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Peça
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Peça
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Regulagem
+                  </th>
+                  {sortedRequests.map(request => (
+                    <th key={request.id} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      {request.response_data?.supplier_name || 'NÃO INFORMADO'}
+                      <br />
+                      <span className="text-xs font-normal normal-case">
+                        {request.response_data?.parts.filter(p => p.available).length || 0} peças disponíveis
+                      </span>
                     </th>
-                    {requests.map(request => (
-                      <th key={request.id} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        {request.response_data?.supplier_name || request.supplier?.name}
-                        <div className="text-gray-400 font-normal">
-                          Prazo: {request.response_data?.delivery_time || 'Não informado'}
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {uniqueParts.map((partDescription, index) => {
+                  const regulationPart = quotation?.parts.find(p => p.description === partDescription);
+                  return (
+                    <tr key={index} className={`${
+                      findPartInRequest(requests[0], partDescription)?.purchased ? 'bg-green-50' : 
+                      index % 2 === 0 ? 'bg-white' : 'bg-gray-50'
+                    }`}>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-start">
+                          {findPartInRequest(requests[0], partDescription)?.purchased && (
+                            <svg className="w-5 h-5 text-green-600 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                          <div>
+                            <div className="text-sm font-medium text-gray-900">{partDescription}</div>
+                            {findPartInRequest(requests[0], partDescription)?.purchased && (
+                              <div className="text-xs text-gray-600 mt-1">
+                                <div>Comprada em: {new Date(findPartInRequest(requests[0], partDescription)?.purchase_date).toLocaleDateString('pt-BR')}</div>
+                                <div>Valor: {findPartInRequest(requests[0], partDescription)?.purchase_price?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {uniqueParts.map(partDescription => (
-                    <tr key={partDescription}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        {partDescription}
                       </td>
-                      {requests.map(request => {
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {regulationPart?.part_cost ? (
+                          <div>
+                            {regulationPart.part_cost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} /un
+                            <br />
+                            <span className="text-xs text-gray-500">
+                              Total: {(regulationPart.part_cost * regulationPart.quantity).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </span>
+                          </div>
+                        ) : '-'}
+                      </td>
+                      {sortedRequests.map(request => {
                         const part = findPartInRequest(request, partDescription);
+                        const regulationPrice = regulationPart?.part_cost || 0;
+                        const priceDifference = (part?.unit_price || 0) - regulationPrice;
+                        const percentageDifference = regulationPrice > 0 
+                          ? ((priceDifference / regulationPrice) * 100)
+                          : 0;
+
                         return (
-                          <td key={request.id} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <td key={request.id} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                             {part ? (
                               part.available ? (
                                 <div>
-                                  <div className="font-medium text-gray-900">
-                                    R$ {part.unit_price.toFixed(2)} / un
-                                  </div>
-                                  <div className="text-gray-500">
-                                    Total: R$ {part.total_price.toFixed(2)}
-                                  </div>
-                                  {part.notes && (
-                                    <div className="text-gray-400 text-xs mt-1">
-                                      Obs: {part.notes}
-                                    </div>
-                                  )}
+                                  {part.unit_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} /un
+                                  <br />
+                                  <span className={`text-xs ${priceDifference > 0 ? 'text-red-500' : 'text-green-500'}`}>
+                                    {priceDifference > 0 ? '+' : ''}
+                                    {priceDifference.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                    {' '}
+                                    ({priceDifference > 0 ? '+' : ''}
+                                    {percentageDifference.toFixed(1)}%)
+                                  </span>
                                 </div>
                               ) : (
                                 <span className="text-red-500">Não disponível</span>
                               )
-                            ) : (
-                              <span className="text-gray-400">-</span>
-                            )}
+                            ) : '-'}
                           </td>
                         );
                       })}
                     </tr>
-                  ))}
-                  <tr className="bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      Total
+                  );
+                })}
+                <tr className="bg-gray-50 font-medium">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    Total
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {quotation?.parts.reduce((total, part) => total + (part.part_cost || 0) * part.quantity, 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </td>
+                  {sortedRequests.map(request => (
+                    <td key={request.id} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {request.response_data?.total_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                     </td>
-                    {requests.map(request => (
-                      <td key={request.id} className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        R$ {request.response_data?.total_price.toFixed(2)}
-                      </td>
-                    ))}
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>

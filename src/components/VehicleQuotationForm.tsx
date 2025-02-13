@@ -92,79 +92,105 @@ const VehicleQuotationForm = () => {
   };
 
   const processBulkText = async () => {
-    // Dividir o texto em linhas e filtrar linhas vazias
-    const lines = bulkText.split('\n').filter(line => line.trim());
+    try {
+      // Dividir o texto em linhas e filtrar linhas vazias
+      const lines = bulkText.split('\n').filter(line => line.trim());
 
-    // Remove a primeira linha (cabeçalho)
-    const dataLines = lines.slice(1);
+      // Remove a primeira linha (cabeçalho)
+      const dataLines = lines.slice(1);
 
-    // Processar cada linha
-    const newParts = await Promise.all(dataLines.map(async (line) => {
-      // Extrai a operação (pode ser "TROCAR" ou "TROCAR /PINTAR")
-      let operation = "TROCAR"; // valor padrão
-      if (line.includes("TROCAR /PINTAR") || line.includes("TROCAR/PINTAR")) {
-        operation = "TROCAR/PINTAR";
-      }
+      // Processar cada linha
+      const processedParts = await Promise.all(dataLines.map(async (line) => {
+        try {
+          // Extrai a operação (pode ser "TROCAR" ou "TROCAR /PINTAR")
+          let operation = "TROCAR"; // valor padrão
+          if (line.includes("TROCAR /PINTAR") || line.includes("TROCAR/PINTAR")) {
+            operation = "TROCAR/PINTAR";
+          }
 
-      // Remove a operação da linha para processar o resto
-      let processedLine = line.replace(/^TROCAR(\s*\/\s*PINTAR)?/, '').trim();
+          // Remove a operação da linha para processar o resto
+          let processedLine = line.replace(/^TROCAR(\s*\/\s*PINTAR)?/, '').trim();
 
-      // Encontra o índice do (I) que marca o início da descrição
-      const descStartIndex = processedLine.indexOf("(I)");
-      if (descStartIndex === -1) return null; // Se não encontrar (I), ignora a linha
+          // Encontra o índice do (I) que marca o início da descrição
+          const descStartIndex = processedLine.indexOf("(I)");
+          if (descStartIndex === -1) return null; // Se não encontrar (I), ignora a linha
 
-      // Extrai o código (tudo antes do (I), removendo espaços)
-      const code = processedLine.substring(0, descStartIndex).replace(/\s+/g, '');
+          // Extrai o código (tudo antes do (I), removendo espaços)
+          const code = processedLine.substring(0, descStartIndex).replace(/\s+/g, '');
 
-      // Pega o resto da linha após o (I)
-      let restOfLine = processedLine.substring(descStartIndex);
+          // Pega o resto da linha após o (I)
+          let restOfLine = processedLine.substring(descStartIndex);
 
-      // Divide o resto da linha em partes
-      const parts = restOfLine.split(/\s+/).filter(p => p);
+          // Divide o resto da linha em partes
+          const parts = restOfLine.split(/\s+/).filter(p => p);
 
-      // Encontra o índice do tipo de peça (Genuína, Nova, Usada)
-      const typeIndex = parts.findIndex(part => ['Genuína', 'Nova', 'Usada'].includes(part));
-      if (typeIndex === -1) return null;
+          // Encontra o índice do tipo de peça (Genuína, Nova, Usada)
+          const typeIndex = parts.findIndex(part => ['Genuína', 'Nova', 'Usada'].includes(part));
+          if (typeIndex === -1) return null;
 
-      // Pega a descrição (tudo entre (I) e o tipo da peça)
-      const description = parts.slice(0, typeIndex).join(' ');
+          // Pega a descrição (tudo entre (I) e o tipo da peça)
+          const description = parts.slice(0, typeIndex).join(' ');
 
-      // Expande abreviações na descrição
-      const expandedDescription = await expandAbbreviations(description);
+          // Expande abreviações na descrição
+          const expandedDescription = await expandAbbreviations(description);
 
-      // Pega o tipo da peça
-      const partType = parts[typeIndex];
+          // Pega o tipo da peça
+          const partType = parts[typeIndex];
 
-      // Procura números após o tipo da peça
-      const numbers = parts.slice(typeIndex + 1)
-        .map(part => {
-          // Remove pontos de milhar e substitui vírgula por ponto para decimais
-          const cleanNumber = part.replace(/\./g, '').replace(',', '.');
-          return parseFloat(cleanNumber);
-        })
-        .filter(num => !isNaN(num));
+          // Procura números após o tipo da peça
+          const numbers = parts.slice(typeIndex + 1)
+            .map(part => {
+              // Remove pontos de milhar e substitui vírgula por ponto para decimais
+              const cleanNumber = part.replace(/\./g, '').replace(',', '.');
+              return parseFloat(cleanNumber);
+            })
+            .filter(num => !isNaN(num));
 
-      // Extrai quantidade, preço unitário e preço total
-      const [quantity = 1, unitPrice = 0, totalPrice = 0] = numbers;
+          // Extrai quantidade, preço unitário e preço total
+          const [quantity = 1, unitPrice = 0, totalPrice = 0] = numbers;
 
-      // Pega as horas de pintura (último número da linha, se existir)
-      const paintingHours = numbers[numbers.length - 1] || 0;
+          // Pega as horas de pintura (último número da linha, se existir)
+          const paintingHours = numbers[numbers.length - 1] || 0;
+          
+          return {
+            operation,
+            code,
+            description: expandedDescription.trim(),
+            part_type: partType === 'Genuína' ? 'genuine' : 
+                      partType === 'Usada' ? 'used' : 'new',
+            quantity,
+            painting_hours: paintingHours,
+            labor_hours: 0,
+            labor_cost: 0,
+            part_cost: totalPrice || (unitPrice * quantity)
+          };
+        } catch (err) {
+          console.error('Erro ao processar linha:', line, err);
+          return null;
+        }
+      }));
+
+      // Filtra partes nulas e garante que todas as propriedades necessárias existem
+      const validParts = processedParts.filter((part): part is Part => {
+        if (!part) return false;
+        return (
+          typeof part.operation === 'string' &&
+          typeof part.code === 'string' &&
+          typeof part.description === 'string' &&
+          typeof part.part_type === 'string' &&
+          typeof part.quantity === 'number' &&
+          typeof part.painting_hours === 'number' &&
+          typeof part.labor_hours === 'number' &&
+          typeof part.labor_cost === 'number' &&
+          typeof part.part_cost === 'number'
+        );
+      });
       
-      return {
-        operation: operation,
-        code: code,
-        description: expandedDescription.trim(),
-        part_type: partType === 'Genuína' ? 'genuine' : 
-                  partType === 'Usada' ? 'used' : 'new',
-        quantity: quantity,
-        painting_hours: paintingHours,
-        labor_hours: 0,
-        labor_cost: 0,
-        part_cost: totalPrice || (unitPrice * quantity) // Usa o preço total ou calcula baseado no unitário
-      };
-    }).filter((part): part is Part => part !== null));
-    
-    setParts(newParts);
+      setParts(validParts);
+    } catch (err) {
+      console.error('Erro ao processar texto:', err);
+      // toast.error('Erro ao processar texto. Verifique o formato e tente novamente.');
+    }
   };
 
   const nextStep = () => {

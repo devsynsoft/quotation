@@ -134,10 +134,9 @@ const QuotationResponse = () => {
         newParts[index].total_price = 0;
       }
       
-      // Se marcou como disponível, mantém os valores zerados até editar
-      if (field === 'available' && value) {
-        newParts[index].unit_price = 0;
-        newParts[index].total_price = 0;
+      // Se preencheu o preço unitário, marca como disponível
+      if (field === 'unit_price' && value > 0) {
+        newParts[index].available = true;
       }
 
       // Atualiza o preço total da peça se estiver disponível
@@ -286,7 +285,7 @@ const QuotationResponse = () => {
                   type="text"
                   value={response.supplier_name || ''}
                   onChange={e => setResponse(prev => ({ ...prev, supplier_name: e.target.value }))}
-                  className="mt-1 block w-full rounded-md border-2 border-blue-200 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 px-5 text-[16px] h-12 bg-white"
+                  className="mt-1 block w-full rounded-md border-2 border-blue-200 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 disabled:bg-gray-100 disabled:cursor-not-allowed"
                   required
                   placeholder="Digite seu nome completo"
                 />
@@ -299,7 +298,7 @@ const QuotationResponse = () => {
                   type="tel"
                   value={response.supplier_phone || ''}
                   onChange={e => setResponse(prev => ({ ...prev, supplier_phone: e.target.value }))}
-                  className="mt-1 block w-full rounded-md border-2 border-blue-200 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 px-5 text-[16px] h-12 bg-white"
+                  className="mt-1 block w-full rounded-md border-2 border-blue-200 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 disabled:bg-gray-100 disabled:cursor-not-allowed"
                   required
                   placeholder="(00) 00000-0000"
                 />
@@ -311,6 +310,9 @@ const QuotationResponse = () => {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
+                    <th scope="col" className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Disponível
+                    </th>
                     <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Peça
                     </th>
@@ -323,9 +325,6 @@ const QuotationResponse = () => {
                     <th scope="col" className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Total
                     </th>
-                    <th scope="col" className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Disponível
-                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -334,6 +333,32 @@ const QuotationResponse = () => {
                       part.available === true ? 'bg-green-50' : 
                       part.available === false ? 'bg-red-50' : ''
                     }`}>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
+                        <div className="flex justify-center items-center space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => handlePartChange(index, 'available', true)}
+                            className={`px-3 py-1 rounded-l-md text-xs font-medium ${
+                              part.available === true
+                                ? 'bg-green-600 text-white'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                          >
+                            Sim
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handlePartChange(index, 'available', false)}
+                            className={`px-3 py-1 rounded-r-md text-xs font-medium ${
+                              part.available === false
+                                ? 'bg-red-600 text-white'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                          >
+                            Não
+                          </button>
+                        </div>
+                      </td>
                       <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                         {part.description}
                       </td>
@@ -367,32 +392,6 @@ const QuotationResponse = () => {
                           -
                         </td>
                       )}
-                      <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
-                        <div className="flex justify-center items-center space-x-2">
-                          <button
-                            type="button"
-                            onClick={() => handlePartChange(index, 'available', true)}
-                            className={`px-3 py-1 rounded-l-md text-xs font-medium ${
-                              part.available === true
-                                ? 'bg-green-600 text-white'
-                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                            }`}
-                          >
-                            Sim
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handlePartChange(index, 'available', false)}
-                            className={`px-3 py-1 rounded-r-md text-xs font-medium ${
-                              part.available === false
-                                ? 'bg-red-600 text-white'
-                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                            }`}
-                          >
-                            Não
-                          </button>
-                        </div>
-                      </td>
                     </tr>
                   ))}
                 </tbody>

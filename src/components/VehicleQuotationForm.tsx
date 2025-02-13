@@ -3,10 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
-import { Trash2, Plus, Upload, FileText, Loader2 } from 'lucide-react';
+import { Trash2, Plus, Upload, FileText, Loader2, Book } from 'lucide-react';
 import SupplierSelection from './SupplierSelection';
 import { QuotationPartForm, QuotationPart } from './quotations/QuotationPartForm';
 import { expandAbbreviations } from '../utils/textUtils';
+import TextAbbreviationsModal from './TextAbbreviationsModal';
 
 interface Part {
   operation: string;
@@ -63,6 +64,7 @@ const VehicleQuotationForm = () => {
   const [uploadedImages, setUploadedImages] = useState<File[]>([]);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [messageTemplate, setMessageTemplate] = useState('');
+  const [isAbbreviationsModalOpen, setIsAbbreviationsModalOpen] = useState(false);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setUploadedImages(prev => [...prev, ...acceptedFiles]);
@@ -89,7 +91,7 @@ const VehicleQuotationForm = () => {
     setVehicle(prev => ({ ...prev, [name]: value }));
   };
 
-  const processBulkText = () => {
+  const processBulkText = async () => {
     // Dividir o texto em linhas e filtrar linhas vazias
     const lines = bulkText.split('\n').filter(line => line.trim());
 
@@ -97,7 +99,7 @@ const VehicleQuotationForm = () => {
     const dataLines = lines.slice(1);
 
     // Processar cada linha
-    const newParts = dataLines.map(line => {
+    const newParts = await Promise.all(dataLines.map(async (line) => {
       // Extrai a operação (pode ser "TROCAR" ou "TROCAR /PINTAR")
       let operation = "TROCAR"; // valor padrão
       if (line.includes("TROCAR /PINTAR") || line.includes("TROCAR/PINTAR")) {
@@ -128,7 +130,7 @@ const VehicleQuotationForm = () => {
       const description = parts.slice(0, typeIndex).join(' ');
 
       // Expande abreviações na descrição
-      const expandedDescription = expandAbbreviations(description);
+      const expandedDescription = await expandAbbreviations(description);
 
       // Pega o tipo da peça
       const partType = parts[typeIndex];
@@ -160,7 +162,7 @@ const VehicleQuotationForm = () => {
         labor_cost: 0,
         part_cost: totalPrice || (unitPrice * quantity) // Usa o preço total ou calcula baseado no unitário
       };
-    }).filter((part): part is Part => part !== null);
+    }).filter((part): part is Part => part !== null));
     
     setParts(newParts);
   };
@@ -508,7 +510,9 @@ const VehicleQuotationForm = () => {
                   >
                     <FileText className="mx-auto h-8 w-8 mb-2" />
                     <div className="font-medium">Relatório</div>
-                    <p className="text-sm text-gray-500">Descreva as peças necessárias</p>
+                    <p className="text-sm text-gray-500">
+                      Descreva as peças necessárias
+                    </p>
                   </button>
                 </div>
               </div>
@@ -688,16 +692,26 @@ const VehicleQuotationForm = () => {
                       placeholder="Ex:&#10;71103T5NM50 (I) ACAB DIR FAROL NEBL (f) Genuína 1&#10;74100T5NA10 (I) PARA-BARRO DIA DIR (f) Genuína 1"
                     />
                   </div>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      processBulkText();
-                    }}
-                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                  >
-                    Processar Lista
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        await processBulkText();
+                      }}
+                      className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                    >
+                      Processar Lista
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsAbbreviationsModalOpen(true)}
+                      className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                    >
+                      <Book className="h-5 w-5 mr-2" />
+                      Abreviações
+                    </button>
+                  </div>
                   {parts.length > 0 && (
                     <div className="mt-4">
                       <h4 className="text-lg font-medium mb-4">Peças Processadas</h4>
@@ -706,36 +720,17 @@ const VehicleQuotationForm = () => {
                           <div key={index} className="p-4 bg-gray-50 rounded-lg">
                             <div className="grid grid-cols-2 gap-4 mb-2">
                               <div>
-                                <span className="font-medium">Código:</span> {part.code}
+                                <span className="font-medium">CÓD. PEÇA:</span> {part.code}
                               </div>
                               <div>
-                                <span className="font-medium">Operação:</span> {part.operation}
+                                <span className="font-medium">Quantidade:</span> {part.quantity}
                               </div>
                             </div>
                             <div className="mb-2">
                               <span className="font-medium">Descrição:</span> {part.description}
                             </div>
-                            <div className="grid grid-cols-3 gap-4">
-                              <div>
-                                <span className="font-medium">Tipo:</span> {part.part_type}
-                              </div>
-                              <div>
-                                <span className="font-medium">Quantidade:</span> {part.quantity}
-                              </div>
-                              <div>
-                                <span className="font-medium">Horas Pintura:</span> {part.painting_hours}
-                              </div>
-                            </div>
-                            <div className="grid grid-cols-3 gap-4">
-                              <div>
-                                <span className="font-medium">Horas Trabalho:</span> {part.labor_hours}
-                              </div>
-                              <div>
-                                <span className="font-medium">Custo Trabalho:</span> {part.labor_cost}
-                              </div>
-                              <div>
-                                <span className="font-medium">Custo Peça:</span> {part.part_cost}
-                              </div>
+                            <div>
+                              <span className="font-medium">Custo Peça:</span> {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(part.part_cost)}
                             </div>
                             <button
                               type="button"
@@ -819,15 +814,13 @@ const VehicleQuotationForm = () => {
         </form>
       ) : quotationId ? (
         <div className="space-y-6">
-          <h2 className="text-xl font-semibold mb-4">Selecione os Fornecedores</h2>
           <SupplierSelection
             quotationId={quotationId}
             vehicleDetails={{
               marca: vehicle.brand,
               modelo: vehicle.model,
               ano: vehicle.year,
-              placa: vehicle.plate,
-              chassis: vehicle.chassis
+              placa: vehicle.plate
             }}
             parts={parts}
             images={vehicle.images}
@@ -835,6 +828,17 @@ const VehicleQuotationForm = () => {
           />
         </div>
       ) : null}
+
+      <TextAbbreviationsModal
+        isOpen={isAbbreviationsModalOpen}
+        onClose={() => setIsAbbreviationsModalOpen(false)}
+        onAbbreviationsUpdated={() => {
+          // Reprocessa o texto quando as abreviações são atualizadas
+          if (bulkText) {
+            processBulkText();
+          }
+        }}
+      />
     </div>
   );
 };

@@ -6,6 +6,15 @@ interface WhatsAppConfig {
   evolution_api_url: string;
 }
 
+interface MessageTemplate {
+  id: string;
+  name: string;
+  content: string;
+  is_default: boolean;
+  user_id: string;
+  sequence: number;
+}
+
 export async function getWhatsAppConfig(userId: string): Promise<WhatsAppConfig | null> {
   try {
     const { data: configs, error: configError } = await supabase
@@ -38,18 +47,39 @@ export async function getWhatsAppConfig(userId: string): Promise<WhatsAppConfig 
   }
 }
 
+async function getMessageTemplates(): Promise<MessageTemplate[]> {
+  try {
+    const { data: templates, error } = await supabase
+      .from('message_templates')
+      .select('*')
+      .order('sequence', { ascending: true });
+
+    if (error) {
+      console.error('Erro ao buscar templates:', error);
+      return [];
+    }
+
+    return templates || [];
+  } catch (error) {
+    console.error('Erro ao buscar templates:', error);
+    return [];
+  }
+}
+
 export async function sendWhatsAppMessage({
   areaCode,
   phone,
   message,
   userId,
-  imageUrl
+  imageUrl,
+  useTemplates = false
 }: {
   areaCode: string;
   phone: string;
   message: string;
   userId?: string;
   imageUrl?: string;
+  useTemplates?: boolean;
 }): Promise<{ error?: Error }> {
   try {
     const config = await getWhatsAppConfig(userId || (await supabase.auth.getUser()).data.user?.id || '');
@@ -72,30 +102,92 @@ export async function sendWhatsAppMessage({
     // Normaliza a URL base removendo barras duplicadas
     const baseUrl = config.evolution_api_url.replace(/\/+$/, '');
 
-    // Primeiro envia a mensagem de texto
-    const textResponse = await fetch(`${baseUrl}/message/sendText/${config.instance_name}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': config.evolution_api_key
-      },
-      body: JSON.stringify({
-        number: fullPhone,
-        text: message
-      })
-    });
+    if (useTemplates) {
+      // Busca os templates e envia cada um em sequência
+      const templates = await getMessageTemplates();
+      
+      for (const template of templates) {
+        // Extrai os valores das variáveis da mensagem original
+        const variables: { [key: string]: string } = {};
+        
+        // Extrai vehicle_brand, vehicle_model, vehicle_year, vehicle_chassis
+        const vehicleRegex = /{(vehicle_[^}]+)}([^{]+)/g;
+        let match;
+        while ((match = vehicleRegex.exec(message)) !== null) {
+          const [, key, value] = match;
+          variables[key] = value.trim();
+        }
 
-    if (!textResponse.ok) {
-      const errorData = await textResponse.json().catch(() => textResponse.text());
-      console.error('Resposta da API (texto):', {
-        status: textResponse.status,
-        statusText: textResponse.statusText,
-        error: errorData
+        // Extrai parts_list - todo o texto entre {parts_list} e o próximo {
+        const partsMatch = message.match(/{parts_list}([^{]+)/);
+        if (partsMatch) {
+          variables['parts_list'] = partsMatch[1].trim();
+        }
+
+        // Extrai quotation_link - todo o texto entre {quotation_link} e o próximo {
+        const linkMatch = message.match(/{quotation_link}([^{]+)/);
+        if (linkMatch) {
+          variables['quotation_link'] = linkMatch[1].trim();
+        }
+
+        // Substitui as variáveis no template
+        let processedMessage = template.content;
+        Object.entries(variables).forEach(([key, value]) => {
+          processedMessage = processedMessage.replace(new RegExp(`\\{${key}\\}`, 'g'), value);
+        });
+
+        // Envia o template processado
+        const textResponse = await fetch(`${baseUrl}/message/sendText/${config.instance_name}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': config.evolution_api_key
+          },
+          body: JSON.stringify({
+            number: fullPhone,
+            text: processedMessage
+          })
+        });
+
+        if (!textResponse.ok) {
+          const errorData = await textResponse.json().catch(() => textResponse.text());
+          console.error('Resposta da API (texto):', {
+            status: textResponse.status,
+            statusText: textResponse.statusText,
+            error: errorData
+          });
+          throw new Error(`Erro ao enviar mensagem: ${textResponse.statusText}`);
+        }
+
+        // Aguarda um pequeno intervalo entre as mensagens
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    } else {
+      // Envia a mensagem normalmente
+      const textResponse = await fetch(`${baseUrl}/message/sendText/${config.instance_name}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': config.evolution_api_key
+        },
+        body: JSON.stringify({
+          number: fullPhone,
+          text: message
+        })
       });
-      throw new Error(`Erro ao enviar mensagem: ${textResponse.statusText}`);
+
+      if (!textResponse.ok) {
+        const errorData = await textResponse.json().catch(() => textResponse.text());
+        console.error('Resposta da API (texto):', {
+          status: textResponse.status,
+          statusText: textResponse.statusText,
+          error: errorData
+        });
+        throw new Error(`Erro ao enviar mensagem: ${textResponse.statusText}`);
+      }
     }
 
-    // Se houver imagem, envia depois da mensagem
+    // Se houver imagem, envia depois das mensagens de texto
     if (imageUrl) {
       console.log('Tentando enviar imagem:', {
         url: imageUrl,

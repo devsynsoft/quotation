@@ -1,7 +1,9 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Loader2 } from 'lucide-react';
+import { Plus, Loader2, Book } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import TextAbbreviationsModal from '../TextAbbreviationsModal';
+import { processText, clearAbbreviationsCache } from '../../utils/textProcessing';
 
 type Part = {
   operation: string;
@@ -23,6 +25,7 @@ export function PartsForm() {
   const [description, setDescription] = React.useState('');
   const [selectedVehicle, setSelectedVehicle] = React.useState('');
   const [vehicles, setVehicles] = React.useState<any[]>([]);
+  const [isAbbreviationsModalOpen, setIsAbbreviationsModalOpen] = React.useState(false);
 
   React.useEffect(() => {
     fetchVehicles();
@@ -183,6 +186,33 @@ export function PartsForm() {
     }
   }
 
+  // Processa o texto substituindo abreviações
+  const processDescription = async (text: string) => {
+    try {
+      const processedText = await processText(text);
+      setDescription(processedText);
+    } catch (err: any) {
+      setError(`Erro ao processar texto: ${err.message}`);
+    }
+  };
+
+  // Reprocessa o texto quando as abreviações são atualizadas
+  const handleAbbreviationsUpdated = async () => {
+    clearAbbreviationsCache();
+    if (description) {
+      await processDescription(description);
+    }
+  };
+
+  const processBulkText = async () => {
+    try {
+      const processedText = await processText(bulkText);
+      setBulkText(processedText);
+    } catch (err: any) {
+      setError(`Erro ao processar texto: ${err.message}`);
+    }
+  };
+
   return (
     <div className="max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold mb-6">Adicionar Peças</h1>
@@ -211,33 +241,42 @@ export function PartsForm() {
       </div>
 
       <div className="mb-6">
-        <div className="flex space-x-4">
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Modo de Entrada
+        </label>
+        <div className="flex gap-2">
           <button
             type="button"
             onClick={() => setMode('single')}
-            className={`px-4 py-2 rounded-lg ${
-              mode === 'single' ? 'bg-blue-600 text-white' : 'bg-gray-100'
+            className={`px-4 py-2 rounded ${
+              mode === 'single' 
+                ? 'bg-blue-500 text-white' 
+                : 'bg-gray-100 hover:bg-gray-200'
             }`}
           >
-            Uma por Uma
+            Peça Individual
           </button>
           <button
             type="button"
             onClick={() => setMode('bulk')}
-            className={`px-4 py-2 rounded-lg ${
-              mode === 'bulk' ? 'bg-blue-600 text-white' : 'bg-gray-100'
+            className={`px-4 py-2 rounded ${
+              mode === 'bulk' 
+                ? 'bg-blue-500 text-white' 
+                : 'bg-gray-100 hover:bg-gray-200'
             }`}
           >
-            Importação em Massa
+            Lista em Lote
           </button>
           <button
             type="button"
             onClick={() => setMode('description')}
-            className={`px-4 py-2 rounded-lg ${
-              mode === 'description' ? 'bg-blue-600 text-white' : 'bg-gray-100'
+            className={`px-4 py-2 rounded ${
+              mode === 'description' 
+                ? 'bg-blue-500 text-white' 
+                : 'bg-gray-100 hover:bg-gray-200'
             }`}
           >
-            Descrição
+            Descrição Livre
           </button>
         </div>
       </div>
@@ -350,6 +389,23 @@ export function PartsForm() {
               onChange={e => setBulkText(e.target.value)}
               placeholder="TROCAR 62 07 244 26R (I) CJ FRISOS NEBLINA Genuína 1 131,37 131,37 0,00 0.00 0.00"
             />
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={processBulkText}
+                className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+              >
+                Processar Lista
+              </button>
+              <button
+                onClick={() => setIsAbbreviationsModalOpen(true)}
+                className="px-4 py-2 bg-gray-100 rounded hover:bg-gray-200 flex items-center gap-2"
+                title="Gerenciar Abreviações"
+              >
+                <Book className="h-5 w-5" />
+                Abreviações
+              </button>
+            </div>
             <p className="mt-2 text-sm text-gray-500">
               Cada linha deve começar com TROCAR e seguir o formato:<br />
               TROCAR [código] (I) [descrição] [tipo] [quantidade] [preço unitário]
@@ -358,16 +414,16 @@ export function PartsForm() {
         )}
 
         {mode === 'description' && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Descreva as peças necessárias
-            </label>
-            <textarea
-              className="w-full h-32 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-              placeholder="Exemplo: Peças dianteiras para Sandero incluindo para-choque, grade e faróis"
-            />
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <textarea
+                className="w-full h-32 p-2 border rounded"
+                placeholder="Digite a descrição da peça..."
+                value={description}
+                onChange={e => setDescription(e.target.value)}
+                onBlur={e => processDescription(e.target.value)}
+              />
+            </div>
           </div>
         )}
 
@@ -385,6 +441,13 @@ export function PartsForm() {
           </button>
         </div>
       </form>
+
+      {/* Modal de abreviações */}
+      <TextAbbreviationsModal
+        isOpen={isAbbreviationsModalOpen}
+        onClose={() => setIsAbbreviationsModalOpen(false)}
+        onAbbreviationsUpdated={handleAbbreviationsUpdated}
+      />
     </div>
   );
 }

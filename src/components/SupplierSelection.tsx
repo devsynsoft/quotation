@@ -47,7 +47,8 @@ const SupplierSelection: React.FC<SupplierSelectionProps> = ({
     city: '',
     state: '',
     part_type: '',
-    specialization: ''
+    specialization: '',
+    name: ''
   });
   const [sending, setSending] = useState(false);
 
@@ -66,29 +67,26 @@ const SupplierSelection: React.FC<SupplierSelectionProps> = ({
 
       if (error) throw error;
       if (data) {
-        // Substitui as variáveis no template
-        let template = data.content;
+        // Monta a mensagem com as variáveis
+        let message = '';
         
-        // Substitui as variáveis do veículo
-        const veiculoText = `${vehicleDetails.marca} ${vehicleDetails.modelo} ${vehicleDetails.ano}`.trim();
-        template = template.replace(/{vehicle_brand}/g, vehicleDetails.marca || '')
-                         .replace(/{vehicle_model}/g, vehicleDetails.modelo || '')
-                         .replace(/{vehicle_year}/g, vehicleDetails.ano || '')
-                         .replace(/{vehicle_chassis}/g, vehicleDetails.chassis || '');
+        // Adiciona as variáveis do veículo
+        message += `{vehicle_brand}${vehicleDetails.marca || ''}\n`;
+        message += `{vehicle_model}${vehicleDetails.modelo || ''}\n`;
+        message += `{vehicle_year}${vehicleDetails.ano || ''}\n`;
+        message += `{vehicle_chassis}${vehicleDetails.chassis || ''}\n\n`;
 
         // Formata a lista de peças
         const partsText = parts.map(part => 
-          `- ${part.operation} - ${part.code}
-${part.description}
-Tipo: ${part.part_type === 'genuine' ? 'Genuína' : part.part_type === 'used' ? 'Usada' : 'Nova'}
-Quantidade: ${part.quantity}
-${part.painting_hours > 0 ? `Horas Pintura: ${part.painting_hours}` : ''}`
+          `${part.description}
+Cod. Peça: ${part.code || '-'}
+Quantidade: ${part.quantity}`
         ).join('\n\n');
 
-        // Substitui a lista de peças
-        template = template.replace(/{parts_list}/g, partsText);
+        // Adiciona a lista de peças
+        message += `{parts_list}${partsText}\n\n`;
 
-        setMessageTemplate(template);
+        setMessageTemplate(message);
       }
     } catch (err) {
       console.error('Erro ao carregar template:', err);
@@ -174,16 +172,15 @@ ${part.painting_hours > 0 ? `Horas Pintura: ${part.painting_hours}` : ''}`
         const request = insertedRequests?.find(r => r.supplier_id === supplier.id);
         
         let message = messageTemplate;
-        message = message.replace(
-          /{quotation_link}/g, 
-          `${window.location.origin}/quotation-response/${quotationId}/${request?.id}`
-        );
+        // Adiciona o link no formato correto
+        message += `{quotation_link}${window.location.origin}/quotation-response/${quotationId}/${request?.id}`;
 
         return { 
           areaCode: supplier.area_code,
           phone: supplier.phone,
           message,
-          imageUrl: coverImage // Adiciona a imagem de capa selecionada
+          imageUrl: coverImage,
+          useTemplates: true
         };
       });
 
@@ -214,6 +211,7 @@ ${part.painting_hours > 0 ? `Horas Pintura: ${part.painting_hours}` : ''}`
     if (filters.state && supplier.state.toLowerCase() !== filters.state.toLowerCase()) return false;
     if (filters.specialization && !supplier.categories?.includes(filters.specialization)) return false;
     if (filters.part_type && !supplier.categories?.includes(filters.part_type)) return false;
+    if (filters.name && !supplier.name.toLowerCase().includes(filters.name.toLowerCase())) return false;
     return true;
   });
 
@@ -354,13 +352,25 @@ ${part.painting_hours > 0 ? `Horas Pintura: ${part.painting_hours}` : ''}`
         <div className="mt-4 space-y-4">
           <div className="flex justify-between items-center">
             <h3 className="text-lg font-medium">Fornecedores</h3>
-            <button
-              onClick={handleSelectAll}
-              type="button"
-              className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-            >
-              Selecionar Todos
-            </button>
+            <div className="flex items-center gap-4">
+              <div className="relative w-64">
+                <input
+                  type="text"
+                  placeholder="Buscar fornecedor..."
+                  value={filters.name}
+                  onChange={e => setFilters(prev => ({ ...prev, name: e.target.value }))}
+                  className="pl-10 pr-4 py-2 h-9 w-full border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+                <Search className="w-5 h-5 text-gray-400 absolute left-3 top-2" />
+              </div>
+              <button
+                onClick={handleSelectAll}
+                type="button"
+                className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              >
+                Selecionar Todos
+              </button>
+            </div>
           </div>
 
           {loading ? (
@@ -385,12 +395,14 @@ ${part.painting_hours > 0 ? `Horas Pintura: ${part.painting_hours}` : ''}`
                       {supplier.city}, {supplier.state} ({supplier.area_code}) {supplier.phone}
                     </p>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={selectedSuppliers.includes(supplier.id)}
-                    onChange={() => toggleSupplier(supplier.id)}
-                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                  />
+                  <div onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedSuppliers.includes(supplier.id)}
+                      onChange={() => toggleSupplier(supplier.id)}
+                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded cursor-pointer"
+                    />
+                  </div>
                 </div>
               ))}
             </div>

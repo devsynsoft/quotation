@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Medal } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 
 interface Part {
@@ -91,6 +91,34 @@ export function QuotationCompare() {
     };
   };
 
+  // Função para encontrar o menor preço disponível para uma peça
+  const findLowestPrice = (part: Part, requests: QuotationRequest[]) => {
+    let bestPrice: number | null = null;
+
+    requests.forEach(request => {
+      const quotedPart = request.response_data?.parts.find(p => p.description === part.description);
+      if (!quotedPart?.available) return;
+
+      if (!bestPrice || quotedPart.unit_price < bestPrice) {
+        bestPrice = quotedPart.unit_price;
+      }
+    });
+
+    return bestPrice;
+  };
+
+  const isLowestPrice = (currentPrice: number, part: Part, requests: QuotationRequest[]) => {
+    const lowestPrice = findLowestPrice(part, requests);
+    const isLowest = lowestPrice !== null && currentPrice === lowestPrice;
+    console.log('Checking lowest price:', {
+      description: part.description,
+      currentPrice,
+      lowestPrice,
+      isLowest
+    });
+    return isLowest;
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-screen">
@@ -166,7 +194,7 @@ export function QuotationCompare() {
                     if (!quotedPart?.available || !part.unit_price) {
                       return (
                         <td key={request.id} className="px-3 py-4 text-sm text-center text-gray-500">
-                          -
+                          Não disponível
                         </td>
                       );
                     }
@@ -174,17 +202,33 @@ export function QuotationCompare() {
                     const diff = calculateDifference(quotedPart.unit_price, part.unit_price);
                     const textColorClass = diff.isAbove ? 'text-red-600' : 'text-green-600';
 
+                    // Encontra o menor preço disponível para esta peça
+                    const menorPreco = requests.reduce((menor, req) => {
+                      const p = req.response_data?.parts.find(p => p.description === part.description);
+                      if (!p?.available) return menor;
+                      if (menor === null || p.unit_price < menor) return p.unit_price;
+                      return menor;
+                    }, null as number | null);
+
+                    const ehMenorPreco = menorPreco === quotedPart.unit_price;
+
                     return (
-                      <td key={request.id} className="px-3 py-4 text-sm text-right">
-                        <div>
-                          {quotedPart.unit_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                        </div>
-                        <div className={textColorClass}>
-                          {diff.value > 0 ? '+' : ''}
-                          {diff.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                          {' '}
-                          ({diff.value > 0 ? '+' : ''}
-                          {diff.percentage.toFixed(1)}%)
+                      <td key={request.id} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <div className="flex items-center gap-2">
+                          {ehMenorPreco && (
+                            <Medal className="w-5 h-5 text-yellow-500" />
+                          )}
+                          <div>
+                            {quotedPart.unit_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} /un
+                            <br />
+                            <span className={`text-xs ${textColorClass}`}>
+                              {diff.value > 0 ? '+' : ''}
+                              {diff.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                              {' '}
+                              ({diff.value > 0 ? '+' : ''}
+                              {diff.percentage.toFixed(1)}%)
+                            </span>
+                          </div>
                         </div>
                       </td>
                     );

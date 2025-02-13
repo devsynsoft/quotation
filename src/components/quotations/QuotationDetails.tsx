@@ -6,7 +6,6 @@ import { sendBulkWhatsAppMessages } from '../../services/evolutionApi';
 import { toast } from '../../lib/toast';
 import { useAuth } from '../../hooks/useAuth';
 import { Link } from 'react-router-dom';
-import { MarketplaceSearch } from './MarketplaceSearch';
 
 interface Vehicle {
   brand: string;
@@ -87,6 +86,20 @@ interface SelectedPart {
   partIndex: number;
 }
 
+interface BestPrice {
+  description: string;
+  quantity: number;
+  supplier: {
+    id: string;
+    name: string;
+  };
+  unit_price: number;
+  total_price: number;
+  available: boolean;
+  purchased?: boolean;
+  regulation_price?: number;
+}
+
 export function QuotationDetails() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -98,9 +111,11 @@ export function QuotationDetails() {
   const [sendingMessages, setSendingMessages] = useState<{ [key: string]: boolean }>({});
   const [selectedParts, setSelectedParts] = useState<Record<string, SelectedPart>>({});
   const [creatingOrder, setCreatingOrder] = useState(false);
+  const [bestPrices, setBestPrices] = useState<BestPrice[]>([]);
+  const [selectedBestPrices, setSelectedBestPrices] = useState<string[]>([]);
   const [user, setUser] = useState<any>(null);
   const [apiLog, setApiLog] = useState<string>('');
-  const [messageTemplate, setMessageTemplate] = useState<string>('');
+  const [messageTemplate, setMessageTemplate] = useState('');
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [company, setCompany] = useState<{
@@ -211,15 +226,15 @@ export function QuotationDetails() {
       const { data, error } = await supabase
         .from('message_templates')
         .select('content')
-        .eq('is_default', true)
-        .single();
+        .order('sequence', { ascending: true })
+        .limit(1);
 
       if (error) throw error;
       if (data) {
-        setMessageTemplate(data.content);
+        setMessageTemplate(data[0]?.content || '');
       }
     } catch (err) {
-      console.error('Erro ao carregar template:', err);
+      console.error('Erro ao carregar templates:', err);
     }
   };
 
@@ -300,26 +315,27 @@ export function QuotationDetails() {
     }
   };
 
-  const formatMessage = () => {
-    if (!quotation || !messageTemplate) return '';
+  const formatMessage = (template: string) => {
+    if (!quotation) return '';
 
-    let message = messageTemplate;
-
-    // Substitui as variáveis do veículo
+    let message = '';
+    
+    // Adiciona as variáveis do veículo
     if (quotation.vehicle) {
-      message = message
-        .replace(/{marca}/g, quotation.vehicle.brand)
-        .replace(/{modelo}/g, quotation.vehicle.model)
-        .replace(/{ano}/g, quotation.vehicle.year)
-        .replace(/{chassi}/g, quotation.vehicle.chassis || '');
+      message += `{vehicle_brand}${quotation.vehicle.brand || ''}\n`;
+      message += `{vehicle_model}${quotation.vehicle.model || ''}\n`;
+      message += `{vehicle_year}${quotation.vehicle.year || ''}\n`;
+      message += `{vehicle_chassis}${quotation.vehicle.chassis || ''}\n\n`;
     }
 
-    // Substitui a lista de peças
+    // Formata a lista de peças
     if (quotation.parts && quotation.parts.length > 0) {
       const partsText = quotation.parts
-        .map(part => `- ${part.description} (${part.quantity} unidades)`)
-        .join('\n');
-      message = message.replace(/{pecas}/g, partsText);
+        .map(part => `${part.description}
+Cod. Peça: ${part.code || '-'}
+Quantidade: ${part.quantity}`)
+        .join('\n\n');
+      message += `{parts_list}${partsText}\n\n`;
     }
 
     return message;
@@ -338,32 +354,28 @@ export function QuotationDetails() {
     try {
       setSendingMessages(prev => ({ ...prev, [request.supplier_id]: true }));
 
-      let message = formatMessage();
-      
-      message = message.replace(
-        /{quotation_link}/g, 
-        `${window.location.origin}/quotation-response/${quotation.id}/${request.id}`
-      );
-
       if (!request.supplier.area_code || !request.supplier.phone) {
         throw new Error(`Fornecedor ${request.supplier.name} não tem DDD ou telefone cadastrado`);
       }
 
+      let message = formatMessage(messageTemplate);
+      message += `{quotation_link}${window.location.origin}/quotation-response/${quotation.id}/${request.id}`;
+
       const logMessage = `Enviando mensagem para ${request.supplier.name}:
 Telefone: ${request.supplier.area_code}${request.supplier.phone}
 Mensagem:
-${message}
-${selectedImageUrl ? `\nImagem: ${selectedImageUrl}` : ''}`;
+${message}`;
       setApiLog(prev => prev + '\n\n' + logMessage);
 
-      // Envia a mensagem de texto primeiro
+      // Envia a mensagem usando os templates
       await sendBulkWhatsAppMessages([{
         areaCode: request.supplier.area_code,
         phone: request.supplier.phone,
-        message
+        message,
+        useTemplates: true
       }], user.id);
 
-      // Se houver imagem selecionada, envia em seguida
+      // Se houver imagem selecionada, envia por último
       if (selectedImageUrl) {
         await sendBulkWhatsAppMessages([{
           areaCode: request.supplier.area_code,
@@ -401,7 +413,7 @@ ${selectedImageUrl ? `\nImagem: ${selectedImageUrl}` : ''}`;
     }
 
     try {
-      let message = formatMessage();
+      setSendingToAll(true);
       const validRequests = requests.filter(request => 
         request.supplier.area_code && 
         request.supplier.phone
@@ -411,29 +423,28 @@ ${selectedImageUrl ? `\nImagem: ${selectedImageUrl}` : ''}`;
         throw new Error('Nenhum fornecedor tem DDD e telefone cadastrados');
       }
 
-      // Envia a mensagem de texto primeiro para todos
+      // Envia a mensagem para todos usando os templates
       const textMessages = validRequests.map(request => {
-        const messageWithLink = message.replace(
-          /{quotation_link}/g, 
-          `${window.location.origin}/quotation-response/${quotation.id}/${request.id}`
-        );
+        let message = formatMessage(messageTemplate);
+        message += `{quotation_link}${window.location.origin}/quotation-response/${quotation.id}/${request.id}`;
 
         const logMessage = `Enviando mensagem para ${request.supplier.name}:
 Telefone: ${request.supplier.area_code}${request.supplier.phone}
 Mensagem:
-${messageWithLink}`;
+${message}`;
         setApiLog(prev => prev + '\n\n' + logMessage);
 
         return { 
           areaCode: request.supplier.area_code,
           phone: request.supplier.phone,
-          message: messageWithLink
+          message,
+          useTemplates: true
         };
       });
 
       await sendBulkWhatsAppMessages(textMessages, user.id);
 
-      // Se houver imagem selecionada, envia para todos em seguida
+      // Se houver imagem selecionada, envia por último para todos
       if (selectedImageUrl) {
         const imageMessages = validRequests.map(request => ({
           areaCode: request.supplier.area_code,
@@ -453,20 +464,20 @@ ${messageWithLink}`;
         sent_at: new Date().toISOString()
       }));
 
-      await supabase
+      const { error } = await supabase
         .from('quotation_requests')
         .upsert(updates);
 
-      toast.success(`Mensagens reenviadas para ${validRequests.length} fornecedores`);
+      if (error) throw error;
 
-      // Recarrega os detalhes
+      toast.success('Mensagens enviadas com sucesso');
       await loadQuotationDetails();
     } catch (err: any) {
-      console.error('Erro ao reenviar mensagens:', err);
-      toast.error(`Erro ao reenviar mensagens: ${err.message}`);
+      console.error('Erro ao enviar mensagens:', err);
+      toast.error(`Erro ao enviar mensagens: ${err.message}`);
       setApiLog(prev => prev + '\n❌ Erro: ' + err.message);
     } finally {
-      setSendingMessages({});
+      setSendingToAll(false);
     }
   };
 
@@ -559,6 +570,115 @@ ${messageWithLink}`;
     }
   };
 
+  const calculateBestPrices = () => {
+    if (!quotation || !quotationRequests.length) return;
+
+    const bestPrices: BestPrice[] = [];
+    const allParts = new Set(quotation.parts.map(p => p.description));
+
+    allParts.forEach(description => {
+      const quotationPart = quotation.parts.find(p => p.description === description);
+      if (!quotationPart) return;
+
+      let bestPrice: BestPrice | null = null;
+
+      quotationRequests.forEach(request => {
+        const part = request.response_data?.parts.find(p => p.description === description);
+        if (!part || !part.available) return;
+
+        if (!bestPrice || part.unit_price < bestPrice.unit_price) {
+          bestPrice = {
+            description,
+            quantity: part.quantity,
+            supplier: {
+              id: request.supplier.id,
+              name: request.response_data?.supplier_name || request.supplier.name
+            },
+            unit_price: part.unit_price,
+            total_price: part.total_price,
+            available: true,
+            purchased: quotationPart.purchased,
+            regulation_price: quotationPart.part_cost
+          };
+        }
+      });
+
+      if (bestPrice) {
+        bestPrices.push(bestPrice);
+      }
+    });
+
+    setBestPrices(bestPrices);
+  };
+
+  useEffect(() => {
+    if (quotationRequests.length > 0 && quotation) {
+      calculateBestPrices();
+    }
+  }, [quotationRequests, quotation]);
+
+  const handleCreateBestPriceOrders = async () => {
+    if (!quotation || !selectedBestPrices.length) return;
+
+    setCreatingOrder(true);
+
+    try {
+      // Agrupa as peças por fornecedor
+      const ordersBySupplier = selectedBestPrices.reduce((acc: Record<string, BestPrice[]>, description) => {
+        const bestPrice = bestPrices.find(p => p.description === description);
+        if (!bestPrice) return acc;
+
+        const supplierId = bestPrice.supplier.id;
+        if (!acc[supplierId]) {
+          acc[supplierId] = [];
+        }
+        acc[supplierId].push(bestPrice);
+        return acc;
+      }, {});
+
+      // Cria uma ordem de compra para cada fornecedor
+      for (const [supplierId, parts] of Object.entries(ordersBySupplier)) {
+        const total_amount = parts.reduce((total, part) => total + part.total_price, 0);
+
+        const { data: order, error: orderError } = await supabase
+          .from('purchase_orders')
+          .insert({
+            quotation_id: quotation.id,
+            supplier_id: supplierId,
+            status: 'pending',
+            total_amount
+          })
+          .select()
+          .single();
+
+        if (orderError) throw orderError;
+
+        const orderItems = parts.map(part => ({
+          purchase_order_id: order.id,
+          part_description: part.description,
+          quantity: part.quantity,
+          unit_price: part.unit_price,
+          total_price: part.total_price
+        }));
+
+        const { error: itemsError } = await supabase
+          .from('purchase_order_items')
+          .insert(orderItems);
+
+        if (itemsError) throw itemsError;
+      }
+
+      toast.success('Ordens de compra criadas com sucesso');
+      await loadPurchaseOrders();
+      setSelectedBestPrices([]);
+    } catch (err: any) {
+      console.error('Erro ao criar ordens de compra:', err);
+      toast.error('Erro ao criar ordens de compra');
+    } finally {
+      setCreatingOrder(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-screen">
@@ -630,16 +750,10 @@ ${messageWithLink}`;
               <thead className="bg-gray-50">
                 <tr>
                   <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Operação
-                  </th>
-                  <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Código
+                    CÓD. PEÇA
                   </th>
                   <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Descrição
-                  </th>
-                  <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Tipo
                   </th>
                   <th scope="col" className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Qtde
@@ -651,12 +765,6 @@ ${messageWithLink}`;
                     Total
                   </th>
                   <th scope="col" className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Desc(%)
-                  </th>
-                  <th scope="col" className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Horas Pintura
-                  </th>
-                  <th scope="col" className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Status
                   </th>
                 </tr>
@@ -665,17 +773,10 @@ ${messageWithLink}`;
                 {quotation.parts.map((part, index) => (
                   <tr key={index} className={part.purchased ? 'bg-green-50' : ''}>
                     <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
-                      {part.operation || 'TROCAR'}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                       {part.code}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                       {part.description}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
-                      {part.part_type === 'genuine' ? 'Genuína' :
-                       part.part_type === 'used' ? 'Usada' : 'Nova'}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-center">
                       {part.quantity}
@@ -697,28 +798,27 @@ ${messageWithLink}`;
                       ) : '-'}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-center">
-                      {part.discount_percentage || '-'}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-center">
-                      {part.painting_hours || '0,00'}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
-                      {part.purchased ? (
-                        <div className="flex items-center justify-center space-x-1">
-                          <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                          </svg>
-                          <div className="text-xs text-gray-600">
-                            <div>Comprada em: {new Date(part.purchase_date).toLocaleDateString('pt-BR')}</div>
-                            <div>Valor: {part.purchase_price?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="text-gray-500">Pendente</span>
-                      )}
+                      {part.purchased ? 'Comprado' : 'Pendente'}
                     </td>
                   </tr>
                 ))}
+                {/* Linha totalizadora */}
+                <tr className="bg-gray-50 font-medium">
+                  <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900" colSpan={4}>
+                    Total Geral
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right">
+                    {quotation.parts.reduce((total, part) => {
+                      return total + (part.part_cost ? part.part_cost * part.quantity : 0);
+                    }, 0).toLocaleString('pt-BR', { 
+                      style: 'currency', 
+                      currency: 'BRL' 
+                    })}
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-center">
+                    -
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
@@ -802,78 +902,71 @@ ${messageWithLink}`;
                   </div>
 
                   <div id={`supplier-${request.id}`} className="p-4" style={{ display: 'none' }}>
-                    {request.response_data?.parts.map((part, index) => {
-                      const quotationPart = quotation?.parts[index];
-                      const isSelected = selectedParts[quotationPart?.description || '']?.requestId === request.id;
-                      const isPurchased = quotationPart?.purchased;
-                      
-                      // Calcula a diferença de preço com a regulagem
-                      const regulationPrice = quotationPart?.part_cost || 0;
-                      const priceDifference = part.unit_price - regulationPrice;
-                      const percentageDifference = regulationPrice > 0 
-                        ? ((priceDifference / regulationPrice) * 100)
-                        : 0;
+                    {request.response_data?.parts
+                      .slice()
+                      .sort((a, b) => {
+                        // Primeiro as peças normais, depois já compradas, por último indisponíveis
+                        const aQuotationPart = quotation?.parts.find(p => p.description === a.description);
+                        const bQuotationPart = quotation?.parts.find(p => p.description === b.description);
+                        
+                        // 0: normal, 1: comprada, 2: indisponível
+                        const getStatus = (part: any, quotationPart: any) => {
+                          if (!part.available) return 2;
+                          if (quotationPart?.purchased) return 1;
+                          return 0;
+                        }
+                        
+                        return getStatus(a, aQuotationPart) - getStatus(b, bQuotationPart);
+                      })
+                      .map((part, index) => {
+                        const quotationPart = quotation?.parts.find(p => p.description === part.description);
+                        const isSelected = selectedParts[part.description]?.requestId === request.id;
+                        const isPurchased = quotationPart?.purchased;
 
-                      return (
-                        <div key={index} className="mb-4 last:mb-0">
-                          <div className="flex items-start">
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              disabled={!part.available || isPurchased}
-                              onChange={() => handlePartSelect(quotationPart?.description || '', request.id, index)}
-                              className="mt-1 h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 disabled:opacity-50"
-                            />
-                            <div className="ml-3 flex-grow">
-                              <div className="flex justify-between items-start">
-                                <div>
-                                  <p className="text-sm font-medium">{part.description}</p>
-                                  <p className="text-sm text-gray-500">Quantidade: {part.quantity}</p>
-                                </div>
-                                <div className="text-right">
-                                  <p className="text-sm font-medium">
-                                    {part.unit_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} /unidade
-                                  </p>
-                                  {regulationPrice > 0 && (
-                                    <p className={`text-xs ${priceDifference > 0 ? 'text-red-500' : 'text-green-500'}`}>
-                                      {priceDifference > 0 ? '+' : ''}
-                                      {priceDifference.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                      {' '}
-                                      ({priceDifference > 0 ? '+' : ''}
-                                      {percentageDifference.toFixed(1)}%)
+                        return (
+                          <div key={index} className="mb-4 last:mb-0">
+                            <div className="flex items-start">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                disabled={!part.available || isPurchased}
+                                onChange={() => handlePartSelect(quotationPart?.description || '', request.id, index)}
+                                className="mt-1 h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 disabled:opacity-50"
+                              />
+                              <div className="ml-3 flex-grow">
+                                <div className="flex justify-between items-start">
+                                  <div>
+                                    <p className="text-sm font-medium">{part.description}</p>
+                                    <p className="text-sm text-gray-500">Quantidade: {part.quantity}</p>
+                                  </div>
+                                  <div className="text-right">
+                                    <p className="text-sm font-medium">
+                                      {part.unit_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} /unidade
                                     </p>
-                                  )}
-                                  <p className="text-sm text-gray-500">
-                                    Total: {part.total_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                  </p>
+                                    {part.available && quotationPart?.unit_price && (
+                                      <p className="text-xs text-gray-500">
+                                        {calculateDifference(part.unit_price, quotationPart.unit_price)}
+                                      </p>
+                                    )}
+                                    <p className="text-sm text-gray-500">
+                                      Total: {part.total_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                    </p>
+                                  </div>
                                 </div>
+                                {!part.available && (
+                                  <p className="text-sm text-red-500 mt-1">Peça não disponível</p>
+                                )}
+                                {isPurchased && (
+                                  <p className="text-sm text-green-600 mt-1">Peça já comprada</p>
+                                )}
+                                {part.notes && (
+                                  <p className="text-sm text-gray-500 mt-1">{part.notes}</p>
+                                )}
                               </div>
-                              {!part.available && (
-                                <p className="text-sm text-red-500 mt-1">Peça não disponível</p>
-                              )}
-                              {isPurchased && (
-                                <p className="text-sm text-green-600 mt-1">Peça já comprada</p>
-                              )}
-                              {part.notes && (
-                                <p className="text-sm text-gray-500 mt-1">{part.notes}</p>
-                              )}
                             </div>
                           </div>
-                        </div>
-                      );
-                    })}
-
-                    {request.response_data?.delivery_time && (
-                      <p className="text-sm text-gray-600 mt-4">
-                        Prazo de entrega: {request.response_data.delivery_time}
-                      </p>
-                    )}
-
-                    {request.response_data?.notes && (
-                      <p className="text-sm text-gray-600 mt-2">
-                        Observações: {request.response_data.notes}
-                      </p>
-                    )}
+                        );
+                      })}
                   </div>
                 </div>
               ))}
@@ -900,6 +993,130 @@ ${messageWithLink}`;
                   'Gerar Ordem de Compra'
                 )}
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Pacote Ideal de Compra */}
+        {bestPrices.length > 0 && (
+          <div className="bg-white shadow rounded-lg p-6 mb-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-medium">Pacote Ideal de Compra</h2>
+              <button
+                onClick={handleCreateBestPriceOrders}
+                disabled={creatingOrder || selectedBestPrices.length === 0}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+              >
+                {creatingOrder ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Gerando Ordens...
+                  </>
+                ) : (
+                  'Gerar Ordens de Compra'
+                )}
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              {Object.entries(
+                bestPrices.reduce((acc, part) => {
+                  const supplierId = part.supplier.id;
+                  if (!acc[supplierId]) {
+                    acc[supplierId] = {
+                      supplier: part.supplier,
+                      parts: [],
+                      total: 0
+                    };
+                  }
+                  acc[supplierId].parts.push(part);
+                  acc[supplierId].total += part.total_price;
+                  return acc;
+                }, {} as Record<string, { supplier: BestPrice['supplier'], parts: BestPrice[], total: number }>)
+              )
+                .sort((a, b) => b[1].total - a[1].total) // Ordena por valor total
+                .map(([supplierId, group]) => (
+                  <div key={supplierId} className="space-y-4">
+                    <div className="flex justify-between items-center border-b pb-2">
+                      <h3 className="font-medium text-gray-900">{group.supplier.name}</h3>
+                      <p className="text-sm text-gray-500">
+                        Total: {group.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      </p>
+                    </div>
+                    
+                    <div className="space-y-4">
+                      {group.parts
+                        .sort((a, b) => {
+                          // Primeiro as não compradas
+                          if (a.purchased !== b.purchased) {
+                            return a.purchased ? 1 : -1;
+                          }
+                          // Depois por valor total
+                          return b.total_price - a.total_price;
+                        })
+                        .map((part) => (
+                          <div 
+                            key={part.description} 
+                            className={`border rounded-lg p-4 ${part.purchased ? 'bg-gray-50' : ''}`}
+                          >
+                            <div className="flex items-start">
+                              <input
+                                type="checkbox"
+                                checked={selectedBestPrices.includes(part.description)}
+                                disabled={part.purchased}
+                                onChange={(e) => {
+                                  setSelectedBestPrices(prev => 
+                                    e.target.checked 
+                                      ? [...prev, part.description]
+                                      : prev.filter(d => d !== part.description)
+                                  );
+                                }}
+                                className="mt-1 h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 disabled:opacity-50"
+                              />
+                              <div className="ml-3 flex-grow">
+                                <div className="flex justify-between">
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <p className="font-medium">{part.description}</p>
+                                      {part.purchased && (
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                          Comprada
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-sm text-gray-500">Quantidade: {part.quantity}</p>
+                                    {part.regulation_price && (
+                                      <p className="text-sm text-gray-500">
+                                        Regulagem: {part.regulation_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                        {part.unit_price > part.regulation_price && (
+                                          <span className="text-red-500 ml-2">
+                                            (+{((part.unit_price - part.regulation_price) / part.regulation_price * 100).toFixed(0)}%)
+                                          </span>
+                                        )}
+                                        {part.unit_price < part.regulation_price && (
+                                          <span className="text-green-500 ml-2">
+                                            (-{((part.regulation_price - part.unit_price) / part.regulation_price * 100).toFixed(0)}%)
+                                          </span>
+                                        )}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <div className="text-right">
+                                    <p className="font-medium">
+                                      {part.unit_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} /un
+                                    </p>
+                                    <p className="text-sm text-gray-500">
+                                      Total: {part.total_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                ))}
             </div>
           </div>
         )}
@@ -963,58 +1180,16 @@ ${messageWithLink}`;
           </div>
         )}
 
-        {/* Lista de peças */}
-        <div className="space-y-4">
-          {quotation.parts.map((part, index) => (
-            <div key={index} className="border rounded-lg p-4 bg-white shadow-sm">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h4 className="text-lg font-medium">{part.description}</h4>
-                  {part.code && (
-                    <p className="text-sm text-gray-500">Código: {part.code}</p>
-                  )}
-                  <p className="text-sm text-gray-500">Quantidade: {part.quantity}</p>
-                  {part.notes && (
-                    <p className="text-sm text-gray-500">Observações: {part.notes}</p>
-                  )}
-                </div>
-                <div>
-                  <input
-                    type="checkbox"
-                    checked={selectedParts[index] || false}
-                    disabled={part.purchased}
-                    onChange={(e) => handlePartSelect(part.description, request.id, index)}
-                    className="h-4 w-4 text-blue-600 rounded border-gray-300"
-                  />
-                </div>
-              </div>
-
-              {/* Botões de busca */}
-              <MarketplaceSearch
-                description={part.description}
-                code={part.code}
-                vehicle={{
-                  brand: quotation.vehicle.brand,
-                  model: quotation.vehicle.model,
-                  year: quotation.vehicle.year,
-                }}
-                companyState={company?.state || 'SP'}
-              />
-            </div>
-          ))}
-        </div>
-
+        {/* Log da API */}
+        {apiLog && (
+          <div className="mt-6">
+            <h2 className="text-lg font-medium mb-2">Log de Envio</h2>
+            <pre className="bg-gray-100 p-4 rounded-lg text-sm whitespace-pre-wrap">
+              {apiLog}
+            </pre>
+          </div>
+        )}
       </div>
-
-      {/* Log da API */}
-      {apiLog && (
-        <div className="mt-6">
-          <h2 className="text-lg font-medium mb-2">Log de Envio</h2>
-          <pre className="bg-gray-100 p-4 rounded-lg text-sm whitespace-pre-wrap">
-            {apiLog}
-          </pre>
-        </div>
-      )}
     </div>
   );
 }

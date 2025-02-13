@@ -9,6 +9,7 @@ interface MessageTemplate {
   name: string;
   content: string;
   is_default: boolean;
+  sequence: number;
 }
 
 export function MessageTemplates() {
@@ -28,8 +29,7 @@ export function MessageTemplates() {
       const { data, error } = await supabase
         .from('message_templates')
         .select('*')
-        .order('is_default', { ascending: false })
-        .order('name');
+        .order('sequence', { ascending: true });
 
       if (error) throw error;
       setTemplates(data || []);
@@ -38,6 +38,39 @@ export function MessageTemplates() {
       toast.error('Erro ao carregar templates');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleMoveTemplate = async (template: MessageTemplate, direction: 'up' | 'down') => {
+    const currentIndex = templates.findIndex(t => t.id === template.id);
+    if (
+      (direction === 'up' && currentIndex === 0) || 
+      (direction === 'down' && currentIndex === templates.length - 1)
+    ) {
+      return;
+    }
+
+    const newSequence = direction === 'up' 
+      ? templates[currentIndex - 1].sequence
+      : templates[currentIndex + 1].sequence;
+
+    try {
+      const { error } = await supabase.rpc(
+        direction === 'up' ? 'update_template_sequences_up' : 'update_template_sequences_down',
+        {
+          p_template_id: template.id,
+          p_old_sequence: template.sequence,
+          p_new_sequence: newSequence
+        }
+      );
+
+      if (error) throw error;
+
+      await loadTemplates();
+      toast.success('Ordem atualizada com sucesso');
+    } catch (err) {
+      console.error('Erro ao atualizar ordem:', err);
+      toast.error('Erro ao atualizar ordem');
     }
   };
 
@@ -50,12 +83,21 @@ export function MessageTemplates() {
 
     try {
       setSaving(true);
+      
+      // Se é um novo template, pega a maior sequência e adiciona 1
+      let sequence = editingTemplate.sequence;
+      if (!editingTemplate.id) {
+        const maxSequence = templates.reduce((max, t) => Math.max(max, t.sequence || 0), 0);
+        sequence = maxSequence + 1;
+      }
+
       const { error } = await supabase
         .from('message_templates')
         .upsert({
           id: editingTemplate.id,
           name: editingTemplate.name,
           content: editingTemplate.content,
+          sequence,
           user_id: user?.id
         });
 
@@ -102,6 +144,7 @@ export function MessageTemplates() {
       name: '',
       content: '',
       is_default: false,
+      sequence: 0,
     });
   };
 
@@ -125,16 +168,34 @@ export function MessageTemplates() {
       ) : (
         <div className="space-y-4">
           {/* Lista de Templates */}
-          {templates.map(template => (
+          {templates.map((template, index) => (
             <div key={template.id} className="bg-white shadow rounded-lg p-4">
               <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h3 className="font-medium">{template.name}</h3>
-                  {template.is_default && (
-                    <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
-                      Padrão
-                    </span>
-                  )}
+                <div className="flex items-center gap-4">
+                  <div className="flex flex-col gap-1">
+                    <button
+                      onClick={() => handleMoveTemplate(template, 'up')}
+                      disabled={index === 0}
+                      className={`p-1 rounded hover:bg-gray-100 ${index === 0 ? 'text-gray-300' : 'text-gray-600'}`}
+                    >
+                      ▲
+                    </button>
+                    <button
+                      onClick={() => handleMoveTemplate(template, 'down')}
+                      disabled={index === templates.length - 1}
+                      className={`p-1 rounded hover:bg-gray-100 ${index === templates.length - 1 ? 'text-gray-300' : 'text-gray-600'}`}
+                    >
+                      ▼
+                    </button>
+                  </div>
+                  <div>
+                    <h3 className="font-medium">{template.name}</h3>
+                    {template.is_default && (
+                      <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
+                        Padrão
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex gap-2">
                   <button

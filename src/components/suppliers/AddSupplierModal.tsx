@@ -162,8 +162,7 @@ export function AddSupplierModal({ isOpen, onClose, onSuccess, initialData }: Ad
       const supplierData = {
         ...supplier,
         state: selectedState.sigla,
-        city: selectedCity.nome,
-        user_id: user.id
+        city: selectedCity.nome
       };
 
       const { data, error: dbError } = initialData

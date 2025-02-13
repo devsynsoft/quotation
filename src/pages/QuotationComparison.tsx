@@ -314,16 +314,22 @@ export function QuotationComparison() {
                           <td key={request.id} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                             {part ? (
                               part.available ? (
-                                <div>
-                                  {part.unit_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} /un
-                                  <br />
-                                  <span className={`text-xs ${priceDifference > 0 ? 'text-red-500' : 'text-green-500'}`}>
-                                    {priceDifference > 0 ? '+' : ''}
-                                    {priceDifference.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                    {' '}
-                                    ({priceDifference > 0 ? '+' : ''}
-                                    {percentageDifference.toFixed(1)}%)
-                                  </span>
+                                <div className="flex items-center gap-2">
+                                  <div>
+                                    {part.unit_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} /un
+                                    <br />
+                                    <span className={`text-xs ${priceDifference > 0 ? 'text-red-500' : 'text-green-500'}`}>
+                                      {priceDifference > 0 ? '+' : ''}
+                                      {priceDifference.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                      {' '}
+                                      ({priceDifference > 0 ? '+' : ''}
+                                      {percentageDifference.toFixed(1)}%)
+                                    </span>
+                                  </div>
+                                  {sortedRequests.every(r => {
+                                    const p = findPartInRequest(r, partDescription);
+                                    return !p?.available || (p.available && part.unit_price <= p.unit_price);
+                                  }) && '🏆'}
                                 </div>
                               ) : (
                                 <span className="text-red-500">Não disponível</span>

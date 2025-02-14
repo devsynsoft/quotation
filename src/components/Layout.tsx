@@ -46,7 +46,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             {/* Settings Section */}
             <div className="mt-8 pt-4 border-t">
               <h2 className="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                Configurações
+                Mensagem
               </h2>
               <div className="space-y-2">
                 <Link to="/settings/company" className="flex items-center px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">
@@ -59,21 +59,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 </Link>
                 <Link
                   to="/settings"
-                  className={`${
-                    location.pathname === '/settings'
-                      ? 'bg-gray-900 text-white'
-                      : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                  } group flex items-center px-2 py-2 text-sm font-medium rounded-md`}
+                  className="flex items-center px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg"
                 >
-                  <Settings
-                    className={`${
-                      location.pathname === '/settings'
-                        ? 'text-gray-300'
-                        : 'text-gray-400 group-hover:text-gray-300'
-                    } mr-3 h-6 w-6`}
-                    aria-hidden="true"
-                  />
-                  Configurações
+                  <Settings className="w-5 h-5 mr-3" />
+                  Mensagem
                 </Link>
               </div>
             </div>

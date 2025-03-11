@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2, RefreshCw, Send } from 'lucide-react';
+import { ArrowLeft, Loader2, RefreshCw, Send, Edit } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { sendBulkWhatsAppMessages } from '../../services/evolutionApi';
 import { toast } from '../../lib/toast';
@@ -697,13 +697,23 @@ ${message}`;
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <button
-        onClick={() => navigate('/quotations')}
-        className="mb-6 inline-flex items-center text-sm text-gray-600 hover:text-gray-900"
-      >
-        <ArrowLeft className="w-4 h-4 mr-2" />
-        Voltar para Cotações
-      </button>
+      <div className="flex justify-between items-center mb-6">
+        <button
+          onClick={() => navigate('/quotations')}
+          className="inline-flex items-center text-sm text-gray-600 hover:text-gray-900 mr-4"
+        >
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Voltar para Cotações
+        </button>
+
+        <button
+          onClick={() => navigate(`/quotation/new?edit=${id}`)}
+          className="inline-flex items-center text-sm text-blue-600 hover:text-blue-800"
+        >
+          <Edit className="w-4 h-4 mr-2" />
+          Editar Cotação
+        </button>
+      </div>
 
       <div className="bg-white shadow rounded-lg p-6 mb-6">
         <h1 className="text-2xl font-bold mb-4">Detalhes da Cotação</h1>
@@ -831,7 +841,7 @@ ${message}`;
             <button
               onClick={resendToAll}
               disabled={Object.values(sendingMessages).some(Boolean)}
-              className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50 mr-4"
             >
               <RefreshCw className="w-4 h-4 mr-2" />
               Reenviar para Todos

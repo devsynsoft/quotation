@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useCallback, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
@@ -34,12 +34,14 @@ type InputType = 'manual' | 'bulk' | 'report';
 
 const VehicleQuotationForm = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [currentStep, setCurrentStep] = useState(1);
   const [inputType, setInputType] = useState<InputType>('manual');
   const [quotationId, setQuotationId] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
   const [vehicle, setVehicle] = useState<Vehicle>({
     brand: '',
     model: '',
@@ -253,31 +255,75 @@ const VehicleQuotationForm = () => {
         chassis: vehicle.chassis || null
       });
 
-      // Upload das imagens primeiro
-      const imageUrls = await uploadImages();
-      console.log('URLs das imagens:', imageUrls);
-
-      // Inserir veículo
-      const { data: vehicleData, error: vehicleError } = await supabase
-        .from('vehicles')
-        .insert({
-          brand: vehicle.brand,
-          model: vehicle.model,
-          year: vehicle.year,
-          plate: vehicle.plate || null,
-          chassis: vehicle.chassis || null,
-          images: imageUrls,
-          user_id: user.id
-        })
-        .select()
-        .single();
-
-      if (vehicleError) {
-        console.error('Erro ao criar veículo:', vehicleError);
-        throw vehicleError;
+      let vehicleId;
+      
+      // Se estamos editando, não precisamos fazer upload das imagens novamente se não houver novas
+      let imageUrls = [];
+      
+      // Se temos imagens já carregadas do veículo e não temos novas imagens para upload
+      if (vehicle.images && vehicle.images.length > 0 && uploadedImages.length === 0) {
+        imageUrls = vehicle.images;
+      } else {
+        // Upload das imagens
+        imageUrls = await uploadImages();
+        console.log('URLs das imagens:', imageUrls);
       }
 
-      console.log('Veículo criado:', vehicleData);
+      // Se estamos editando, usamos o veículo existente
+      if (isEditing && quotationId) {
+        // Buscar o ID do veículo da cotação existente
+        const { data: quotationData, error: quotationError } = await supabase
+          .from('quotations')
+          .select('vehicle_id')
+          .eq('id', quotationId)
+          .single();
+          
+        if (quotationError) {
+          throw quotationError;
+        }
+        
+        vehicleId = quotationData.vehicle_id;
+        
+        // Atualizar o veículo existente
+        const { error: vehicleUpdateError } = await supabase
+          .from('vehicles')
+          .update({
+            brand: vehicle.brand,
+            model: vehicle.model,
+            year: vehicle.year,
+            plate: vehicle.plate || null,
+            chassis: vehicle.chassis || null,
+            images: imageUrls
+          })
+          .eq('id', vehicleId);
+          
+        if (vehicleUpdateError) {
+          throw vehicleUpdateError;
+        }
+      } else {
+        // Inserir novo veículo
+        const { data: vehicleData, error: vehicleError } = await supabase
+          .from('vehicles')
+          .insert({
+            brand: vehicle.brand,
+            model: vehicle.model,
+            year: vehicle.year,
+            plate: vehicle.plate || null,
+            chassis: vehicle.chassis || null,
+            images: imageUrls,
+            user_id: user.id
+          })
+          .select()
+          .single();
+
+        if (vehicleError) {
+          console.error('Erro ao criar veículo:', vehicleError);
+          throw vehicleError;
+        }
+
+        console.log('Veículo criado:', vehicleData);
+        vehicleId = vehicleData.id;
+      }
 
       // Atualiza o estado do veículo com as imagens
       setVehicle(prev => ({ ...prev, images: imageUrls }));
@@ -304,32 +350,57 @@ const VehicleQuotationForm = () => {
 
       console.log('Dados das peças:', partsData);
 
-      // Criar cotação
-      const { data: quotationData, error: quotationError } = await supabase
-        .from('quotations')
-        .insert({
-          vehicle_id: vehicleData.id,
-          parts: partsData,
-          description: inputType === 'report' ? report : null,
-          input_type: inputType,
-          status: 'pending',
-          user_id: user.id
-        })
-        .select()
-        .single();
+      let quotationResult;
+      
+      if (isEditing && quotationId) {
+        // Atualizar cotação existente
+        const { data: updatedQuotation, error: updateError } = await supabase
+          .from('quotations')
+          .update({
+            parts: partsData,
+            description: inputType === 'report' ? report : null,
+            input_type: inputType,
+            status: 'pending' // Reseta o status para pending ao editar
+          })
+          .eq('id', quotationId)
+          .select()
+          .single();
+          
+        if (updateError) {
+          throw updateError;
+        }
+        
+        quotationResult = updatedQuotation;
+      } else {
+        // Criar nova cotação
+        const { data: quotationData, error: quotationError } = await supabase
+          .from('quotations')
+          .insert({
+            vehicle_id: vehicleId,
+            parts: partsData,
+            description: inputType === 'report' ? report : null,
+            input_type: inputType,
+            status: 'pending',
+            user_id: user.id
+          })
+          .select()
+          .single();
 
-      if (quotationError) {
-        console.error('Erro ao criar cotação:', quotationError);
-        throw quotationError;
+        if (quotationError) {
+          console.error('Erro ao criar cotação:', quotationError);
+          throw quotationError;
+        }
+        
+        quotationResult = quotationData;
       }
 
-      console.log('Cotação criada:', quotationData);
+      console.log('Cotação ' + (isEditing ? 'atualizada' : 'criada') + ':', quotationResult);
 
-      setQuotationId(quotationData.id);
+      setQuotationId(quotationResult.id);
       setCurrentStep(3); // Avançar para seleção de fornecedores
     } catch (err: any) {
       console.error('Erro ao enviar:', err);
-      setError(err.message || 'Erro ao criar cotação');
+      setError(err.message || 'Erro ao ' + (isEditing ? 'atualizar' : 'criar') + ' cotação');
     } finally {
       setLoading(false);
     }
@@ -360,6 +431,82 @@ const VehicleQuotationForm = () => {
     newParts[index][field] = value;
     setParts(newParts);
   };
+
+  // Função para carregar dados de uma cotação existente
+  const loadExistingQuotation = async (id: string) => {
+    setLoading(true);
+    try {
+      const { data: quotationData, error: quotationError } = await supabase
+        .from('quotations')
+        .select('*, vehicle:vehicles(*)')
+        .eq('id', id)
+        .single();
+
+      if (quotationError) {
+        throw quotationError;
+      }
+
+      if (quotationData) {
+        setQuotationId(quotationData.id);
+        setIsEditing(true);
+        
+        // Preencher dados do veículo
+        if (quotationData.vehicle) {
+          setVehicle({
+            brand: quotationData.vehicle.brand || '',
+            model: quotationData.vehicle.model || '',
+            year: quotationData.vehicle.year || '',
+            plate: quotationData.vehicle.plate || '',
+            chassis: quotationData.vehicle.chassis || '',
+            images: quotationData.vehicle.images || [],
+          });
+          
+          // Configurar imagens existentes
+          if (quotationData.vehicle.images && quotationData.vehicle.images.length > 0) {
+            setImageUrls(quotationData.vehicle.images);
+          }
+        }
+        
+        // Preencher peças
+        if (quotationData.parts && Array.isArray(quotationData.parts)) {
+          setParts(quotationData.parts);
+        }
+        
+        // Definir o tipo de entrada
+        if (quotationData.input_type) {
+          setInputType(quotationData.input_type as InputType);
+        }
+        
+        // Se for do tipo report, preencher o relatório
+        if (quotationData.input_type === 'report' && quotationData.description) {
+          setReport(quotationData.description);
+        }
+        
+        // Se for do tipo bulk, precisamos reconstruir o texto
+        if (quotationData.input_type === 'bulk' && quotationData.parts) {
+          // Aqui você pode reconstruir o texto bulk se necessário
+        }
+        
+        // Avançar para a etapa 3 (seleção de fornecedores)
+        setCurrentStep(3);
+      }
+    } catch (err: any) {
+      console.error('Erro ao carregar cotação:', err);
+      setError('Erro ao carregar dados da cotação: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Verificar se estamos editando uma cotação existente
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    const editId = searchParams.get('edit');
+    
+    if (editId) {
+      loadExistingQuotation(editId);
+    }
+  }, [location]);
 
   return (
     <div className="max-w-2xl mx-auto p-6">
@@ -753,7 +900,17 @@ const VehicleQuotationForm = () => {
                               </div>
                             </div>
                             <div className="mb-2">
-                              <span className="font-medium">Descrição:</span> {part.description}
+                              <span className="font-medium">Descrição:</span>{' '}
+                              <input
+                                type="text"
+                                value={part.description}
+                                onChange={(e) => {
+                                  const newParts = [...parts];
+                                  newParts[index].description = e.target.value;
+                                  setParts(newParts);
+                                }}
+                                className="border-b border-gray-300 focus:border-blue-500 focus:outline-none px-1 py-0.5 ml-1 w-3/4"
+                              />
                             </div>
                             <div>
                               <span className="font-medium">Custo Peça:</span> {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(part.part_cost)}

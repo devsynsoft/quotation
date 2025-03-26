@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Loader2, Search, Send } from 'lucide-react';
 import { sendBulkWhatsAppMessages } from '../services/evolutionApi';
-import { toast } from '../lib/toast';
+import { customToast, hotToast } from '../lib/toast';
 
 interface Supplier {
   id: string;
@@ -78,7 +78,7 @@ const SupplierSelection: React.FC<SupplierSelectionProps> = ({
 
         // Formata a lista de peças
         const partsText = parts.map(part => 
-          `${part.description}
+          `⭕ ${part.description}
 Cod. Peça: ${part.code || '-'}
 Quantidade: ${part.quantity}`
         ).join('\n\n');
@@ -105,7 +105,7 @@ Quantidade: ${part.quantity}`
       setSuppliers(data || []);
     } catch (err) {
       console.error('Erro ao carregar fornecedores:', err);
-      toast.error('Erro ao carregar fornecedores');
+      customToast.error('Erro ao carregar fornecedores');
     } finally {
       setLoading(false);
     }
@@ -121,23 +121,23 @@ Quantidade: ${part.quantity}`
 
   const sendQuotationRequests = async () => {
     if (!quotationId) {
-      toast.error('ID da cotação não encontrado');
+      customToast.error('ID da cotação não encontrado');
       return;
     }
 
     if (!messageTemplate.trim()) {
-      toast.error('Por favor, defina a mensagem que será enviada');
+      customToast.error('Por favor, defina a mensagem que será enviada');
       return;
     }
 
     if (images.length > 0 && !coverImage) {
-      toast.error('Por favor, selecione uma foto de capa');
+      customToast.error('Por favor, selecione uma foto de capa');
       return;
     }
 
     try {
       setSending(true);
-      const toastId = toast.loading('Enviando solicitações...');
+      const toastId = customToast.loading('Enviando solicitações...');
 
       // Verifica se todos os fornecedores têm telefone
       const validSuppliers = suppliers.filter(supplier => 
@@ -189,7 +189,8 @@ Quantidade: ${part.quantity}`
 
       await sendBulkWhatsAppMessages(messages, user.id);
 
-      toast.success('Solicitações enviadas com sucesso!', { id: toastId });
+      hotToast.dismiss(toastId);
+      customToast.success('Solicitações enviadas com sucesso!');
       
       if (onFinish) {
         onFinish();
@@ -199,7 +200,7 @@ Quantidade: ${part.quantity}`
       navigate(`/quotations/${quotationId}`);
     } catch (err: any) {
       console.error('Erro ao enviar solicitações:', err);
-      toast.error(err.message || 'Erro ao enviar solicitações');
+      customToast.error(err.message || 'Erro ao enviar solicitações');
     } finally {
       setSending(false);
     }

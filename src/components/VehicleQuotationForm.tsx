@@ -8,6 +8,14 @@ import SupplierSelection from './SupplierSelection';
 import { QuotationPartForm, QuotationPart } from './quotations/QuotationPartForm';
 import { expandAbbreviations } from '../utils/textUtils';
 import TextAbbreviationsModal from './TextAbbreviationsModal';
+import * as pdfjs from 'pdfjs-dist';
+import { customToast, hotToast } from '../lib/toast';
+import { extractVehicleInfoFromPDF } from '../services/geminiService';
+
+// Configurar worker do PDF.js
+if (typeof window !== 'undefined' && 'Worker' in window) {
+  pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+}
 
 interface Part {
   operation: string;
@@ -67,6 +75,7 @@ const VehicleQuotationForm = () => {
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [messageTemplate, setMessageTemplate] = useState('');
   const [isAbbreviationsModalOpen, setIsAbbreviationsModalOpen] = useState(false);
+  const [importingPdf, setImportingPdf] = useState(false);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setUploadedImages(prev => [...prev, ...acceptedFiles]);
@@ -191,7 +200,7 @@ const VehicleQuotationForm = () => {
       setParts(validParts);
     } catch (err) {
       console.error('Erro ao processar texto:', err);
-      // toast.error('Erro ao processar texto. Verifique o formato e tente novamente.');
+      // hotToast.error('Erro ao processar texto. Verifique o formato e tente novamente.');
     }
   };
 
@@ -397,7 +406,7 @@ const VehicleQuotationForm = () => {
       console.log('Cotação ' + (isEditing ? 'atualizada' : 'criada') + ':', quotationResult);
 
       setQuotationId(quotationResult.id);
-      setCurrentStep(3); // Avançar para seleção de fornecedores
+      setCurrentStep(3); // Avançar para a etapa 3 (seleção de fornecedores)
     } catch (err: any) {
       console.error('Erro ao enviar:', err);
       setError(err.message || 'Erro ao ' + (isEditing ? 'atualizar' : 'criar') + ' cotação');
@@ -508,6 +517,555 @@ const VehicleQuotationForm = () => {
     }
   }, [location]);
 
+  // Componente para o botão de upload de PDF
+  const PdfUploadButton = () => {
+    const inputRef = React.useRef<HTMLInputElement>(null);
+
+    const handleClick = () => {
+      inputRef.current?.click();
+    };
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        handlePdfUpload(file);
+      }
+      // Limpar o input para permitir selecionar o mesmo arquivo novamente
+      if (inputRef.current) {
+        inputRef.current.value = '';
+      }
+    };
+
+    return (
+      <div className="flex flex-col items-center">
+        <button
+          type="button"
+          onClick={handleClick}
+          disabled={importingPdf}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+        >
+          {importingPdf ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Processando...</span>
+            </>
+          ) : (
+            <>
+              <FileText className="h-4 w-4" />
+              <span>Importar dados do PDF</span>
+            </>
+          )}
+        </button>
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".pdf"
+          onChange={handleFileChange}
+          className="hidden"
+        />
+        <p className="text-xs text-gray-500 mt-1 text-center">
+          Suporta PDFs da Audatex e similares
+        </p>
+      </div>
+    );
+  };
+
+  const handlePdfUpload = async (file: File) => {
+    setImportingPdf(true);
+    const toastId = hotToast.loading('Processando PDF...');
+    
+    try {
+      console.log('Iniciando processamento do PDF com Gemini:', file.name, 'tamanho:', file.size, 'tipo:', file.type);
+      
+      // Primeiro, tentar extrair informações usando o Gemini
+      const geminiResult = await extractVehicleInfoFromPDF(file);
+      
+      console.log('Resultado da extração com Gemini:', geminiResult);
+      
+      if (geminiResult.success && geminiResult.data) {
+        const { brand, model, year, plate, chassis } = geminiResult.data;
+        
+        // Verificar se o Gemini encontrou pelo menos algumas informações
+        const fieldsFound = [];
+        if (brand) fieldsFound.push('marca');
+        if (model) fieldsFound.push('modelo');
+        if (year) fieldsFound.push('ano');
+        if (plate) fieldsFound.push('placa');
+        if (chassis) fieldsFound.push('chassis');
+        
+        console.log('Campos encontrados pelo Gemini:', fieldsFound);
+        
+        // Atualizar o estado do veículo com os dados extraídos pelo Gemini
+        setVehicle(prev => ({
+          ...prev,
+          brand: brand || prev.brand,
+          model: model || prev.model,
+          year: year || prev.year,
+          plate: plate || prev.plate,
+          chassis: chassis || prev.chassis
+        }));
+        
+        hotToast.dismiss(toastId);
+        
+        if (fieldsFound.length >= 3) {
+          customToast.success(`Dados importados com sucesso via Gemini: ${fieldsFound.join(', ')}!`);
+          setImportingPdf(false);
+          return;
+        } else {
+          console.log('Poucos dados encontrados pelo Gemini, tentando método alternativo...');
+          // Se o Gemini encontrou poucos dados, continuar com o método tradicional como fallback
+        }
+      } else {
+        console.log('Falha na extração com Gemini, tentando método alternativo...', geminiResult.error);
+        // Se o Gemini falhou, continuar com o método tradicional como fallback
+      }
+      
+      console.log('Iniciando extração com método tradicional (fallback)');
+      
+      // Método tradicional (fallback) usando regex e PDF.js
+      const reader = new FileReader();
+      
+      const readFilePromise = new Promise<string>((resolve, reject) => {
+        reader.onload = (event) => {
+          try {
+            const arrayBuffer = event.target?.result as ArrayBuffer;
+            const array = new Uint8Array(arrayBuffer);
+            
+            // Extrair texto do PDF de forma simples
+            let text = '';
+            
+            // Primeiro método: extrair caracteres ASCII imprimíveis
+            for (let i = 0; i < array.length; i++) {
+              // Converter apenas caracteres ASCII imprimíveis
+              if (array[i] >= 32 && array[i] <= 126) {
+                text += String.fromCharCode(array[i]);
+              }
+            }
+            
+            // Segundo método: procurar por strings UTF-8 no arquivo
+            // Isso pode ajudar a encontrar texto em português com acentos
+            let utf8Text = '';
+            for (let i = 0; i < array.length - 1; i++) {
+              // Procurar por sequências que podem ser texto UTF-8
+              if ((array[i] >= 32 && array[i] <= 126) || 
+                  (array[i] >= 192 && array[i] <= 255)) { // Possíveis caracteres UTF-8
+                utf8Text += String.fromCharCode(array[i]);
+              }
+            }
+            
+            // Combinar os dois métodos
+            text = text + ' ' + utf8Text;
+            
+            // Limpar o texto: remover caracteres estranhos e normalizar espaços
+            text = text.replace(/[^\x20-\x7E\xC0-\xFF]/g, ' ')  // Manter apenas caracteres ASCII e Latin-1
+                       .replace(/\s+/g, ' ')                    // Normalizar espaços
+                       .trim();
+            
+            console.log('Texto extraído (primeiros 500 caracteres):', text.substring(0, 500));
+            resolve(text);
+          } catch (error) {
+            reject(error);
+          }
+        };
+        
+        reader.onerror = (error) => reject(error);
+        reader.readAsArrayBuffer(file);
+      });
+      
+      const text = await readFilePromise;
+      
+      // Buscar informações do veículo no texto
+      let brand = '';
+      let model = '';
+      let year = '';
+      let plate = '';
+      let chassis = '';
+      
+      console.log('Buscando padrões no texto extraído...');
+      console.log('Texto completo extraído (para debug):', text);
+      
+      // Método adicional: buscar por blocos de informações do veículo
+      // Muitos PDFs têm blocos onde as informações do veículo estão juntas
+      const vehicleInfoBlocks = [
+        /ve.culo[\s\S]{0,100}marca[\s\S]{0,100}modelo[\s\S]{0,100}ano/i,
+        /dados\s+do\s+ve.culo[\s\S]{0,200}/i,
+        /informa..es\s+do\s+ve.culo[\s\S]{0,200}/i,
+        /ve.culo[\s\S]{0,200}/i
+      ];
+      
+      let vehicleInfoBlock = '';
+      for (const pattern of vehicleInfoBlocks) {
+        const match = text.match(pattern);
+        if (match && match[0]) {
+          vehicleInfoBlock = match[0];
+          console.log('Bloco de informações do veículo encontrado:', vehicleInfoBlock);
+          break;
+        }
+      }
+      
+      // Padrões para diferentes formatos de PDF
+      const brandModelPatterns = [
+        /Marca\/Modelo:\s*([^,\n]+)/i,
+        /MULTIVEICULAR\s+([^\n]+)/i,
+        /Veículo:\s*([^,\n]+)/i,
+        /Ve.culo:\s*([^,\n]+)/i,
+        /Marca:\s*([^\n]+)/i,
+        /Fabricante:\s*([^\n]+)/i,
+        /MARCA:([^,\n]+)/i,
+        /MODELO:([^,\n]+)/i,
+        /VEÍCULO:([^,\n]+)/i,
+        /VEICULO:([^,\n]+)/i,
+        /MARCA\/MODELO:([^,\n]+)/i,
+        /MARCA\/MODELO\s+([^,\n]+)/i,
+        /MARCA\s+E\s+MODELO\s+([^,\n]+)/i,
+        /MARCA\s+E\s+MODELO:([^,\n]+)/i,
+        /MARCA\s*\/\s*MODELO\s*:\s*([^,\n]+)/i,
+        /MARCA\s*\/\s*MODELO\s*=\s*([^,\n]+)/i,
+        /MARCA\s*\/\s*MODELO\s*-\s*([^,\n]+)/i
+      ];
+      
+      // Função para limpar e normalizar os dados extraídos
+      const cleanData = (text: string) => {
+        if (!text) return '';
+        // Remove caracteres especiais e espaços extras
+        return text.replace(/\s+/g, ' ').trim();
+      };
+      
+      // Tentar cada padrão até encontrar um match
+      for (const pattern of brandModelPatterns) {
+        const match = text.match(pattern);
+        if (match && match[1]) {
+          const brandModel = match[1].trim();
+          console.log(`Marca/Modelo encontrado com padrão ${pattern}: ${brandModel}`);
+          
+          // Tentar separar marca e modelo
+          const parts = brandModel.split(/[\s\/]+/);
+          if (parts.length >= 2) {
+            // Se tiver mais de duas palavras, a primeira geralmente é a marca
+            // e o resto é o modelo
+            brand = parts[0];
+            model = parts.slice(1).join(' ');
+            
+            // Verificar se a marca é conhecida
+            const knownBrands = [
+              'VOLKSWAGEN', 'VW', 'FIAT', 'CHEVROLET', 'GM', 'FORD', 'TOYOTA', 
+              'HONDA', 'HYUNDAI', 'RENAULT', 'NISSAN', 'MITSUBISHI', 'CITROEN', 
+              'PEUGEOT', 'BMW', 'MERCEDES', 'AUDI', 'KIA', 'JEEP', 'VOLVO', 
+              'LAND', 'SUBARU', 'SUZUKI', 'CHERY', 'JAC', 'TROLLER', 'RAM', 
+              'DODGE', 'CHRYSLER', 'MINI', 'PORSCHE', 'FERRARI', 'LAMBORGHINI', 
+              'MASERATI', 'JAGUAR', 'LEXUS', 'LIFAN', 'SSANGYONG', 'IVECO',
+              'SCANIA', 'YAMAHA', 'HONDA', 'KAWASAKI', 'DUCATI', 'HARLEY'
+            ];
+            
+            // Se a marca não for conhecida, tentar outras combinações
+            if (!knownBrands.some(kb => brand.toUpperCase().includes(kb))) {
+              // Tentar outras combinações de marca/modelo
+              for (let i = 1; i < parts.length; i++) {
+                const testBrand = parts.slice(0, i+1).join(' ');
+                if (knownBrands.some(kb => testBrand.toUpperCase().includes(kb))) {
+                  brand = testBrand;
+                  model = parts.slice(i+1).join(' ');
+                  break;
+                }
+              }
+            }
+          } else if (parts.length === 1) {
+            // Se só tiver uma palavra, provavelmente é a marca
+            brand = parts[0];
+          }
+          
+          brand = cleanData(brand);
+          model = cleanData(model);
+          break;
+        }
+      }
+      
+      // Se não encontrou marca/modelo juntos, procurar separadamente
+      if (!brand || !model) {
+        const brandPatterns = [
+          /Marca:\s*([^\n,]+)/i,
+          /MARCA:([^\n,]+)/i,
+          /MARCA\s+([^\n,]+)/i,
+          /Fabricante:\s*([^\n,]+)/i,
+          /FABRICANTE:([^\n,]+)/i,
+          /FABRICANTE\s+([^\n,]+)/i,
+          /MARCA\s*:\s*([^\n,]+)/i,
+          /MARCA\s*=\s*([^\n,]+)/i,
+          /MARCA\s*-\s*([^\n,]+)/i,
+          /MARCA\s*DO\s*VEICULO\s*:?\s*([^\n,]+)/i,
+          /MARCA\s*DO\s*VEÍCULO\s*:?\s*([^\n,]+)/i,
+          /MARCA\s*:\s*([^\/\n,]+)/i
+        ];
+        
+        const modelPatterns = [
+          /Modelo:\s*([^\n,]+)/i,
+          /MODELO:([^\n,]+)/i,
+          /MODELO\s+([^\n,]+)/i,
+          /Versão:\s*([^\n,]+)/i,
+          /VERSAO:([^\n,]+)/i,
+          /VERSÃO:([^\n,]+)/i,
+          /MODELO\s*:\s*([^\n,]+)/i,
+          /MODELO\s*=\s*([^\n,]+)/i,
+          /MODELO\s*-\s*([^\n,]+)/i,
+          /VERSAO\s*:\s*([^\n,]+)/i,
+          /VERSÃO\s*:\s*([^\n,]+)/i,
+          /MODELO\s*DO\s*VEICULO\s*:?\s*([^\n,]+)/i,
+          /MODELO\s*DO\s*VEÍCULO\s*:?\s*([^\n,]+)/i,
+          /MODELO\s*:\s*([^\/\n,]+)/i
+        ];
+        
+        // Procurar marca
+        for (const pattern of brandPatterns) {
+          let textToSearch = vehicleInfoBlock || text;
+          const match = textToSearch.match(pattern);
+          if (match && match[1]) {
+            brand = match[1].trim();
+            console.log(`Marca encontrada com padrão ${pattern}: ${brand}`);
+            break;
+          }
+        }
+        
+        // Procurar modelo
+        for (const pattern of modelPatterns) {
+          let textToSearch = vehicleInfoBlock || text;
+          const match = textToSearch.match(pattern);
+          if (match && match[1]) {
+            model = match[1].trim();
+            console.log(`Modelo encontrado com padrão ${pattern}: ${model}`);
+            break;
+          }
+        }
+      }
+      
+      // Procurar por ano do veículo - padrões expandidos
+      const yearPatterns = [
+        /Ano:\s*(\d{4})/i,
+        /(\d{4})\s*\-\s*\d{4}/,
+        /Ano Fab\/Mod:\s*(\d{4})/i,
+        /Ano\s*(\d{4})/i,
+        /Fab\.:\s*(\d{4})/i,
+        /ANO:(\d{4})/i,
+        /ANO FAB:(\d{4})/i,
+        /ANO MODELO:(\d{4})/i,
+        /ANO\s+(\d{4})/i,
+        /ANO MOD\s+(\d{4})/i,
+        /MOD\s+(\d{4})/i,
+        /ANO\s*:\s*(\d{4})/i,
+        /ANO\s*=\s*(\d{4})/i,
+        /ANO\s*-\s*(\d{4})/i,
+        /ANO\s*FAB\s*:\s*(\d{4})/i,
+        /ANO\s*MOD\s*:\s*(\d{4})/i,
+        /ANO\s*DO\s*VEICULO\s*:?\s*(\d{4})/i,
+        /ANO\s*DO\s*VEÍCULO\s*:?\s*(\d{4})/i,
+        /ANO\s*DE\s*FABRICACAO\s*:?\s*(\d{4})/i,
+        /ANO\s*DE\s*FABRICAÇÃO\s*:?\s*(\d{4})/i
+      ];
+      
+      for (const pattern of yearPatterns) {
+        let textToSearch = vehicleInfoBlock || text;
+        const match = textToSearch.match(pattern);
+        if (match && match[1]) {
+          year = match[1].trim();
+          console.log(`Ano encontrado com padrão ${pattern}: ${year}`);
+          break;
+        }
+      }
+      
+      // Busca genérica por anos (4 dígitos entre 1980 e ano atual + 1)
+      if (!year) {
+        const currentYear = new Date().getFullYear() + 1;
+        const yearRegex = new RegExp(`\\b(19[8-9][0-9]|20[0-${Math.floor(currentYear / 10) % 10}][0-${currentYear % 10}])\\b`, 'g');
+        const allYears = Array.from(text.matchAll(yearRegex), m => m[1]);
+        
+        if (allYears.length > 0) {
+          // Pegar o primeiro ano encontrado como possível ano do veículo
+          year = allYears[0];
+          console.log(`Ano encontrado com busca genérica: ${year}`);
+        }
+      }
+      
+      // Padrões para placa do veículo - expandidos
+      const platePatterns = [
+        /Placa:\s*([A-Z0-9]{7})/i,
+        /PLACA:([A-Z0-9]{7})/i,
+        /PLACA\s+([A-Z0-9]{7})/i,
+        /PLACA\s*:\s*([A-Z0-9]{7})/i,
+        /PLACA\s*=\s*([A-Z0-9]{7})/i,
+        /PLACA\s*-\s*([A-Z0-9]{7})/i,
+        /PLACA\s*DO\s*VEICULO\s*:?\s*([A-Z0-9]{7})/i,
+        /PLACA\s*DO\s*VEÍCULO\s*:?\s*([A-Z0-9]{7})/i,
+        // Padrões para placas no formato XXX-YYYY ou XXX0X00
+        /Placa:\s*([A-Z]{3}[\s\-]?[0-9][A-Z0-9][0-9]{2})/i,
+        /PLACA:([A-Z]{3}[\s\-]?[0-9][A-Z0-9][0-9]{2})/i,
+        /PLACA\s+([A-Z]{3}[\s\-]?[0-9][A-Z0-9][0-9]{2})/i,
+        /PLACA\s*:\s*([A-Z]{3}[\s\-]?[0-9][A-Z0-9][0-9]{2})/i,
+        /PLACA\s*=\s*([A-Z]{3}[\s\-]?[0-9][A-Z0-9][0-9]{2})/i,
+        /PLACA\s*-\s*([A-Z]{3}[\s\-]?[0-9][A-Z0-9][0-9]{2})/i,
+        // Padrões para placas no formato antigo (AAA-9999)
+        /Placa:\s*([A-Z]{3}[\s\-]?[0-9]{4})/i,
+        /PLACA:([A-Z]{3}[\s\-]?[0-9]{4})/i,
+        /PLACA\s+([A-Z]{3}[\s\-]?[0-9]{4})/i,
+        /PLACA\s*:\s*([A-Z]{3}[\s\-]?[0-9]{4})/i,
+        /PLACA\s*=\s*([A-Z]{3}[\s\-]?[0-9]{4})/i,
+        /PLACA\s*-\s*([A-Z]{3}[\s\-]?[0-9]{4})/i
+      ];
+      
+      for (const pattern of platePatterns) {
+        let textToSearch = vehicleInfoBlock || text;
+        const match = textToSearch.match(pattern);
+        if (match && match[1]) {
+          plate = match[1].trim().toUpperCase().replace(/[\s\-]/g, '');
+          console.log(`Placa encontrada com padrão ${pattern}: ${plate}`);
+          break;
+        }
+      }
+      
+      // Busca genérica por padrões de placa
+      if (!plate) {
+        // Formato antigo: ABC1234 ou ABC-1234
+        const oldPlatePattern = /\b([A-Z]{3})[-]?([0-9]{4})\b/gi;
+        // Formato Mercosul: ABC1D23 ou ABC-1D23
+        const mercosulPlatePattern = /\b([A-Z]{3})[-]?([0-9]{1}[A-Z]{1}[0-9]{2})\b/gi;
+        
+        let match = oldPlatePattern.exec(text) || mercosulPlatePattern.exec(text);
+        if (match) {
+          plate = match[0].replace(/[^A-Z0-9]/gi, '').toUpperCase();
+          console.log(`Placa encontrada com busca genérica: ${plate}`);
+        }
+      }
+      
+      // Padrões para chassis do veículo - expandidos
+      const chassisPatterns = [
+        /Chassi:\s*([A-Z0-9]{17})/i,
+        /CHASSI:([A-Z0-9]{17})/i,
+        /CHASSI\s+([A-Z0-9]{17})/i,
+        /CHASSI\s*:\s*([A-Z0-9]{17})/i,
+        /CHASSI\s*=\s*([A-Z0-9]{17})/i,
+        /CHASSI\s*-\s*([A-Z0-9]{17})/i,
+        /CHASSI\s*DO\s*VEICULO\s*:?\s*([A-Z0-9]{17})/i,
+        /CHASSI\s*DO\s*VEÍCULO\s*:?\s*([A-Z0-9]{17})/i,
+        /CHASSI\s*Nº\s*:?\s*([A-Z0-9]{17})/i,
+        /CHASSI\s*N\s*:?\s*([A-Z0-9]{17})/i,
+        /CHASSI\s*NUM\s*:?\s*([A-Z0-9]{17})/i,
+        /CHASSI\s*NÚMERO\s*:?\s*([A-Z0-9]{17})/i,
+        /CHASSI\s*NUMERO\s*:?\s*([A-Z0-9]{17})/i,
+        /CHASSIS:\s*([A-Z0-9]{17})/i,
+        /CHASSIS\s+([A-Z0-9]{17})/i,
+        /CHASSIS\s*:\s*([A-Z0-9]{17})/i,
+        /CHASSIS\s*=\s*([A-Z0-9]{17})/i,
+        /CHASSIS\s*-\s*([A-Z0-9]{17})/i,
+        /CHASSIS\s*DO\s*VEICULO\s*:?\s*([A-Z0-9]{17})/i,
+        /CHASSIS\s*DO\s*VEÍCULO\s*:?\s*([A-Z0-9]{17})/i,
+        /CHASSIS\s*Nº\s*:?\s*([A-Z0-9]{17})/i,
+        /CHASSIS\s*N\s*:?\s*([A-Z0-9]{17})/i,
+        /CHASSIS\s*NUM\s*:?\s*([A-Z0-9]{17})/i,
+        /CHASSIS\s*NÚMERO\s*:?\s*([A-Z0-9]{17})/i,
+        /CHASSIS\s*NUMERO\s*:?\s*([A-Z0-9]{17})/i,
+        // Buscar por N° do Chassi
+        /N°\s*DO\s*CHASSI\s*:?\s*([A-Z0-9]{17})/i,
+        /Nº\s*DO\s*CHASSI\s*:?\s*([A-Z0-9]{17})/i,
+        /N\s*DO\s*CHASSI\s*:?\s*([A-Z0-9]{17})/i,
+        /NUM\s*DO\s*CHASSI\s*:?\s*([A-Z0-9]{17})/i,
+        /NUMERO\s*DO\s*CHASSI\s*:?\s*([A-Z0-9]{17})/i,
+        /NÚMERO\s*DO\s*CHASSI\s*:?\s*([A-Z0-9]{17})/i
+      ];
+      
+      for (const pattern of chassisPatterns) {
+        let textToSearch = vehicleInfoBlock || text;
+        const match = textToSearch.match(pattern);
+        if (match && match[1]) {
+          chassis = match[1].trim().toUpperCase();
+          console.log(`Chassis encontrado com padrão ${pattern}: ${chassis}`);
+          break;
+        }
+      }
+      
+      // Busca genérica por padrões de chassis (17 caracteres alfanuméricos)
+      if (!chassis) {
+        // Padrão de chassis: 17 caracteres alfanuméricos, sem I, O, Q
+        const genericChassisPattern = /\b([A-HJ-NPR-Z0-9]{17})\b/i;
+        const match = text.match(genericChassisPattern);
+        if (match && match[1]) {
+          chassis = match[1].trim().toUpperCase();
+          console.log(`Chassis encontrado com padrão genérico: ${chassis}`);
+        }
+      }
+      
+      // Verificar se encontramos pelo menos algumas informações
+      const fieldsFound = [];
+      if (brand) fieldsFound.push('marca');
+      if (model) fieldsFound.push('modelo');
+      if (year) fieldsFound.push('ano');
+      if (plate) fieldsFound.push('placa');
+      if (chassis) fieldsFound.push('chassis');
+      
+      console.log('Informações encontradas no PDF:');
+      console.log('Marca:', brand);
+      console.log('Modelo:', model);
+      console.log('Ano:', year);
+      console.log('Placa:', plate);
+      console.log('Chassis:', chassis);
+      
+      if (fieldsFound.length === 0) {
+        console.log('Nenhuma informação do veículo foi encontrada no PDF');
+        console.log('Texto completo extraído:', text);
+        throw new Error('Não foi possível extrair informações do veículo do PDF. Verifique se o arquivo está no formato correto.');
+      }
+      
+      // Limpar e normalizar todos os dados
+      brand = cleanData(brand);
+      model = cleanData(model);
+      year = cleanData(year);
+      plate = cleanData(plate);
+      chassis = cleanData(chassis);
+      
+      // Atualizar o estado do veículo com os dados extraídos
+      setVehicle(prev => ({
+        ...prev,
+        brand: brand || prev.brand,
+        model: model || prev.model,
+        year: year || prev.year,
+        plate: plate || prev.plate,
+        chassis: chassis || prev.chassis
+      }));
+      
+      hotToast.dismiss(toastId);
+      
+      if (fieldsFound.length >= 3) {
+        customToast.success(`Dados importados com sucesso: ${fieldsFound.join(', ')}!`);
+      } else {
+        customToast.warning('Importação concluída, mas poucos dados foram encontrados. Verifique e complete manualmente.');
+      }
+    } catch (err: any) {
+      console.error('Erro ao processar PDF:', err);
+      
+      // Capturar detalhes do erro
+      let errorDetails = '';
+      if (err instanceof Error) {
+        errorDetails = `${err.name}: ${err.message}`;
+        console.error('Stack trace:', err.stack);
+      } else if (typeof err === 'object') {
+        errorDetails = JSON.stringify(err, Object.getOwnPropertyNames(err));
+      } else {
+        errorDetails = String(err);
+      }
+      
+      let errorMessage = 'Erro ao processar o arquivo PDF';
+      if (errorDetails) {
+        errorMessage += `: ${errorDetails}`;
+      }
+      
+      console.error('Mensagem de erro completa:', errorMessage);
+      
+      if (toastId) {
+        hotToast.dismiss(toastId);
+      }
+      customToast.error(errorMessage);
+    } finally {
+      setImportingPdf(false);
+    }
+  };
+
   return (
     <div className="max-w-2xl mx-auto p-6">
       <div className="mb-8">
@@ -532,7 +1090,12 @@ const VehicleQuotationForm = () => {
             <div className="space-y-6">
               <div className="space-y-4">
                 <h2 className="text-xl font-semibold mb-4">Dados do Veículo</h2>
-                <div className="grid grid-cols-2 gap-4">
+                
+                <div className="mb-6 bg-gray-50 p-4 rounded-md border border-gray-200">
+                  <PdfUploadButton />
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Marca *
@@ -960,7 +1523,7 @@ const VehicleQuotationForm = () => {
           )}
 
           <div className="flex justify-between pt-6">
-            {currentStep > 1 && (
+            {currentStep > 1 ? (
               <button
                 type="button"
                 onClick={prevStep}
@@ -968,7 +1531,7 @@ const VehicleQuotationForm = () => {
               >
                 Voltar
               </button>
-            )}
+            ) : null}
             {currentStep === 1 ? (
               <button
                 type="button"

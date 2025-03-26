@@ -15,11 +15,13 @@ type Filter = {
   state: string;
   city: string;
   specialization: string;
+  searchTerm: string;
 };
 
 export function SupplierList() {
   const { user } = useAuth();
   const [suppliers, setSuppliers] = React.useState<Supplier[]>([]);
+  const [filteredSuppliers, setFilteredSuppliers] = React.useState<Supplier[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState('');
   const [isModalOpen, setIsModalOpen] = React.useState(false);
@@ -29,7 +31,8 @@ export function SupplierList() {
     parts_type: '',
     state: '',
     city: '',
-    specialization: ''
+    specialization: '',
+    searchTerm: ''
   });
   const [importing, setImporting] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -49,6 +52,22 @@ export function SupplierList() {
     others: 'Outros',
     all: 'Todos'
   };
+
+  const applyTextFilter = React.useCallback((data: Supplier[]) => {
+    if (!filters.searchTerm) {
+      setFilteredSuppliers(data);
+      return;
+    }
+
+    const searchTerm = filters.searchTerm.toLowerCase();
+    const filtered = data.filter(supplier => 
+      supplier.name?.toLowerCase().includes(searchTerm) ||
+      supplier.phone?.toLowerCase().includes(searchTerm) ||
+      supplier.city?.toLowerCase().includes(searchTerm) ||
+      supplier.area_code?.toLowerCase().includes(searchTerm)
+    );
+    setFilteredSuppliers(filtered);
+  }, [filters.searchTerm]);
 
   async function fetchSuppliers() {
     if (!user) {
@@ -89,6 +108,7 @@ export function SupplierList() {
       }
       
       setSuppliers(data || []);
+      applyTextFilter(data || []);
     } catch (err) {
       console.error('Erro ao buscar fornecedores:', err);
       setError('Erro ao carregar fornecedores. Por favor, verifique sua conexão e tente novamente.');
@@ -96,6 +116,10 @@ export function SupplierList() {
       setLoading(false);
     }
   }
+
+  React.useEffect(() => {
+    applyTextFilter(suppliers);
+  }, [suppliers, filters.searchTerm, applyTextFilter]);
 
   React.useEffect(() => {
     if (user) {
@@ -120,7 +144,8 @@ export function SupplierList() {
       parts_type: '',
       state: '',
       city: '',
-      specialization: ''
+      specialization: '',
+      searchTerm: ''
     });
   }
 
@@ -141,25 +166,26 @@ export function SupplierList() {
   }
 
   async function handleDelete(e: React.MouseEvent, supplierId: string) {
-    e.stopPropagation(); // Previne a abertura do modal de edição
+    e.stopPropagation();
 
     if (!window.confirm('Tem certeza que deseja excluir este fornecedor?')) {
       return;
     }
 
     try {
-      // Primeiro verifica se há cotações relacionadas
-      const { data: quotationRequests } = await supabase
-        .from('quotation_requests')
-        .select('id')
-        .eq('supplier_id', supplierId);
+      // Primeiro verifica se há cotações relacionadas usando uma query raw
+      const { data: quotationRequests, error: quotationError } = await supabase
+        .rpc('check_supplier_quotations', {
+          supplier_id: supplierId
+        });
+
+      if (quotationError) throw quotationError;
 
       if (quotationRequests && quotationRequests.length > 0) {
         toast.error('Não é possível excluir este fornecedor pois existem cotações associadas a ele');
         return;
       }
 
-      // Se não houver cotações, pode excluir o fornecedor
       const { error } = await supabase
         .from('suppliers')
         .delete()
@@ -168,7 +194,7 @@ export function SupplierList() {
       if (error) throw error;
 
       toast.success('Fornecedor excluído com sucesso');
-      fetchSuppliers(); // Recarrega a lista
+      fetchSuppliers();
     } catch (err) {
       console.error('Erro ao excluir fornecedor:', err);
       toast.error('Erro ao excluir fornecedor');
@@ -238,7 +264,7 @@ export function SupplierList() {
 
         if (error) throw error;
 
-        toast.success(`${suppliers.length} fornecedores importados com sucesso!`);
+        toast.success(`${suppliers.length} fornecedor${suppliers.length > 1 ? 'es' : ''} importado${suppliers.length > 1 ? 's' : ''} com sucesso!`);
         fetchSuppliers(); // Recarrega a lista
       } catch (error: any) {
         console.error('Erro ao importar CSV:', error);
@@ -254,64 +280,70 @@ export function SupplierList() {
     reader.readAsText(file);
   };
 
-  const filteredSuppliers = suppliers.filter(supplier => {
-    if (filters.area_code && supplier.area_code !== filters.area_code) {
-      return false;
-    }
-    if (filters.parts_type && supplier.parts_type !== filters.parts_type) {
-      return false;
-    }
-    if (filters.state && supplier.state !== filters.state) {
-      return false;
-    }
-    if (filters.city && supplier.city !== filters.city) {
-      return false;
-    }
-    if (filters.specialization && supplier.specialization !== filters.specialization) {
-      return false;
-    }
-    return true;
-  });
-
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Fornecedores</h1>
+        <div>
+          <h1 className="text-2xl font-bold">Fornecedores</h1>
+          <p className="text-gray-600 mt-1">
+            {filteredSuppliers.length} {filteredSuppliers.length === 1 ? 'fornecedor' : 'fornecedores'} 
+            {filters.searchTerm && ` encontrado${filteredSuppliers.length === 1 ? '' : 's'}`}
+          </p>
+        </div>
         <div className="flex gap-2">
           <input
             type="file"
-            accept=".csv"
-            onChange={handleImportCSV}
             ref={fileInputRef}
+            onChange={handleImportCSV}
+            accept=".csv"
             className="hidden"
-            id="csv-upload"
           />
-          <label
-            htmlFor="csv-upload"
-            className={`inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${importing ? 'opacity-50 cursor-not-allowed' : ''}`}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={importing}
           >
             {importing ? (
               <>
-                <Loader2 className="animate-spin -ml-1 mr-2 h-5 w-5 text-gray-500" />
+                <Loader2 className="animate-spin" size={20} />
                 Importando...
               </>
             ) : (
               <>
-                <Plus className="-ml-1 mr-2 h-5 w-5 text-gray-500" />
+                <Plus size={20} />
                 Importar CSV
               </>
             )}
-          </label>
+          </button>
           <button
-            onClick={() => {
-              setSelectedSupplier(undefined);
-              setIsModalOpen(true);
-            }}
-            className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            onClick={() => setIsModalOpen(true)}
+            className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 flex items-center gap-2"
           >
-            <Plus className="-ml-1 mr-2 h-5 w-5" />
+            <Plus size={20} />
             Novo Fornecedor
           </button>
+        </div>
+      </div>
+
+      {/* Campo de busca */}
+      <div className="mb-6">
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Buscar por nome, telefone ou cidade..."
+            value={filters.searchTerm}
+            onChange={(e) => handleFilterChange('searchTerm', e.target.value)}
+            className="w-full px-4 py-2 pl-10 pr-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+          {filters.searchTerm && (
+            <button
+              onClick={() => handleFilterChange('searchTerm', '')}
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              <X size={20} />
+            </button>
+          )}
         </div>
       </div>
 

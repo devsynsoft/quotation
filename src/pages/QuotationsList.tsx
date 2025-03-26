@@ -7,18 +7,19 @@ import { toast } from 'react-hot-toast';
 interface Vehicle {
   brand: string;
   model: string;
-  year: number;
-  chassis?: string;
-  plate?: string;
+  year: string;
 }
 
 interface Quotation {
   id: string;
   created_at: string;
-  status: string;
+  status?: string;
   vehicle_id: string;
   vehicles?: Vehicle;
-  total_amount?: number;
+  suppliers_count?: number;
+  first_send_time?: string;
+  last_send_time?: string;
+  vehicle_image?: string;
 }
 
 const STATUS_OPTIONS = [
@@ -46,15 +47,11 @@ const QuotationsList = () => {
         .select(`
           id,
           created_at,
-          status,
-          total_amount,
           vehicle_id,
           vehicles (
             brand,
             model,
-            year,
-            chassis,
-            plate
+            year
           )
         `)
         .order('created_at', { ascending: false });
@@ -78,13 +75,72 @@ const QuotationsList = () => {
         const vehicle = quotation.vehicles;
         
         return (
-          vehicle?.plate?.toLowerCase().includes(searchLower) ||
           vehicle?.model?.toLowerCase().includes(searchLower) ||
           vehicle?.brand?.toLowerCase().includes(searchLower)
         );
-      });
+      }) || [];
 
-      setQuotations(filteredData || []);
+      // Buscar informações de envio para cada cotação
+      const quotationsWithSendInfo = await Promise.all(filteredData.map(async (quotation) => {
+        // Buscar todos os quotation_requests para esta cotação
+        const { data: requestsData, error: requestsError } = await supabase
+          .from('quotation_requests')
+          .select('created_at, supplier_id')
+          .eq('quotation_id', quotation.id)
+          .order('created_at', { ascending: true });
+
+        if (requestsError) {
+          console.error('Erro ao buscar quotation_requests:', requestsError);
+          return quotation;
+        }
+
+        // Buscar imagem do veículo
+        let vehicleImage: string | undefined = undefined;
+        if (quotation.vehicle_id) {
+          try {
+            // Buscar diretamente da tabela vehicles usando any para ignorar erros de tipo
+            const { data: vehicleData, error: vehicleError } = await supabase
+              .from('vehicles')
+              .select('*')
+              .eq('id', quotation.vehicle_id)
+              .single();
+              
+            if (!vehicleError && vehicleData) {
+              // Usar any para acessar o campo images
+              const vehicle = vehicleData as any;
+              if (vehicle.images && Array.isArray(vehicle.images) && vehicle.images.length > 0) {
+                vehicleImage = vehicle.images[0];
+              }
+            }
+          } catch (error) {
+            console.error('Erro ao buscar imagem do veículo:', error);
+          }
+        }
+
+        if (requestsData && requestsData.length > 0) {
+          // Contar fornecedores únicos
+          const uniqueSuppliers = new Set(requestsData.map(req => req.supplier_id));
+          
+          // Obter o primeiro e último timestamp de envio
+          const firstSendTime = requestsData[0].created_at;
+          const lastSendTime = requestsData[requestsData.length - 1].created_at;
+
+          return {
+            ...quotation,
+            suppliers_count: uniqueSuppliers.size,
+            first_send_time: firstSendTime,
+            last_send_time: lastSendTime,
+            vehicle_image: vehicleImage
+          };
+        }
+
+        return {
+          ...quotation,
+          vehicle_image: vehicleImage
+        };
+      }));
+
+      setQuotations(quotationsWithSendInfo);
     } catch (err) {
       console.error('Erro ao carregar cotações:', err);
     } finally {
@@ -158,7 +214,7 @@ const QuotationsList = () => {
         <div className="flex-1 relative">
           <input
             type="text"
-            placeholder="Buscar por placa, modelo ou marca..."
+            placeholder="Buscar por modelo ou marca..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -185,32 +241,38 @@ const QuotationsList = () => {
             className="flex items-center justify-between p-4 border rounded-lg hover:border-blue-300 cursor-pointer"
             onClick={() => navigate(`/quotations/${quotation.id}`)}
           >
-            <div>
-              <h3 className="font-medium">
-                {quotation.vehicles ? (
-                  `${quotation.vehicles.brand} ${quotation.vehicles.model} ${quotation.vehicles.year}`
-                ) : (
-                  'Veículo não encontrado'
-                )}
-              </h3>
-              {quotation.vehicles?.plate && (
-                <p className="text-sm font-medium text-gray-700">
-                  Placa: {quotation.vehicles.plate}
-                </p>
+            <div className="flex items-center">
+              {quotation.vehicle_image && (
+                <div className="mr-4">
+                  <img 
+                    src={quotation.vehicle_image} 
+                    alt={`${quotation.vehicles?.brand} ${quotation.vehicles?.model}`} 
+                    className="w-16 h-16 object-cover rounded-md"
+                  />
+                </div>
               )}
-              {quotation.vehicles?.chassis && (
+              <div>
+                <h3 className="font-medium">
+                  {quotation.vehicles ? (
+                    `${quotation.vehicles.brand} ${quotation.vehicles.model} ${quotation.vehicles.year}`
+                  ) : (
+                    'Veículo não encontrado'
+                  )}
+                </h3>
                 <p className="text-sm text-gray-500">
-                  Chassis: {quotation.vehicles.chassis}
+                  {new Date(quotation.created_at).toLocaleDateString()}
                 </p>
-              )}
-              <p className="text-sm text-gray-500">
-                {new Date(quotation.created_at).toLocaleDateString()}
-              </p>
-              {quotation.total_amount && (
-                <p className="text-sm font-medium text-gray-700 mt-1">
-                  Total: R$ {quotation.total_amount.toFixed(2)}
-                </p>
-              )}
+                {quotation.suppliers_count && (
+                  <p className="text-sm text-gray-700">
+                    <span className="font-medium">Enviado para:</span> {quotation.suppliers_count} fornecedores
+                    {quotation.first_send_time && quotation.last_send_time && (
+                      <span className="ml-1">
+                        ({new Date(quotation.first_send_time).toLocaleTimeString()} - {new Date(quotation.last_send_time).toLocaleTimeString()})
+                      </span>
+                    )}
+                  </p>
+                )}
+              </div>
             </div>
             
             <div className="flex items-center space-x-4">

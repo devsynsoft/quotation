@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Download, Send } from 'lucide-react';
+import { ArrowLeft, Download, Send, MessageCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { toast } from '../lib/toast';
+import { customToast, hotToast } from '../lib/toast';
 import { sendWhatsAppMessage } from '../services/evolutionApi';
 import jsPDF from 'jspdf';
 
@@ -28,6 +28,11 @@ interface PurchaseOrder {
     total_price: number;
     notes?: string;
   }[];
+  vehicle?: {
+    brand: string;
+    model: string;
+    year: string;
+  };
 }
 
 export function PurchaseOrderDetails() {
@@ -36,6 +41,8 @@ export function PurchaseOrderDetails() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [order, setOrder] = useState<PurchaseOrder | null>(null);
+  // Estado para armazenar a URL da imagem do veículo
+  const [vehicleImage, setVehicleImage] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -43,127 +50,241 @@ export function PurchaseOrderDetails() {
     }
   }, [id]);
 
+  // Efeito para carregar a imagem do veículo quando o pedido for carregado
+  useEffect(() => {
+    if (order?.quotation_id) {
+      loadVehicleImage();
+    }
+  }, [order]);
+
   const loadPurchaseOrder = async () => {
     try {
-      const { data, error } = await supabase
+      // Buscamos a ordem de compra
+      const { data: orderData, error: orderError } = await supabase
         .from('purchase_orders')
-        .select(`
-          *,
-          supplier:suppliers(*),
-          items:purchase_order_items(*)
-        `)
-        .eq('id', id)
+        .select('*')
+        .eq('id', id!)
         .single();
 
-      if (error) throw error;
-      setOrder(data);
+      if (orderError) throw orderError;
+      
+      if (!orderData) {
+        throw new Error('Ordem de compra não encontrada');
+      }
+
+      // Buscamos o fornecedor
+      const { data: supplierData, error: supplierError } = await supabase
+        .from('suppliers')
+        .select('name, phone, area_code')
+        .eq('id', orderData.supplier_id)
+        .single();
+
+      if (supplierError) {
+        console.error('Erro ao buscar fornecedor:', supplierError);
+      }
+
+      // Buscamos os itens da ordem
+      const { data: itemsData, error: itemsError } = await supabase
+        .from('purchase_order_items')
+        .select('*')
+        .eq('purchase_order_id', orderData.id);
+      
+      if (itemsError) {
+        console.error('Erro ao buscar itens da ordem:', itemsError);
+      }
+
+      // Criamos um objeto que corresponde à nossa interface PurchaseOrder
+      const purchaseOrder: PurchaseOrder = {
+        id: orderData.id,
+        created_at: orderData.created_at,
+        quotation_id: orderData.quotation_id,
+        supplier_id: orderData.supplier_id,
+        status: orderData.status,
+        total_amount: orderData.total_amount,
+        notes: orderData.notes,
+        delivery_time: orderData.delivery_time,
+        supplier: supplierData || undefined,
+        items: itemsData || []
+      };
+      
+      // Fetch vehicle information from the quotation if available
+      if (purchaseOrder.quotation_id) {
+        try {
+          // Busca a cotação
+          const { data: quotationData, error: quotationError } = await supabase
+            .from('quotations')
+            .select('vehicle_id')
+            .eq('id', purchaseOrder.quotation_id)
+            .single();
+            
+          if (quotationError) {
+            console.error('Erro ao buscar cotação:', quotationError);
+          } else if (quotationData && quotationData.vehicle_id) {
+            // Busca os dados do veículo
+            const { data: vehicleData, error: vehicleError } = await supabase
+              .from('vehicles')
+              .select('brand, model, year')
+              .eq('id', quotationData.vehicle_id)
+              .single();
+              
+            if (vehicleError) {
+              console.error('Erro ao buscar veículo:', vehicleError);
+            } else if (vehicleData) {
+              purchaseOrder.vehicle = vehicleData;
+            }
+          }
+        } catch (quotationError) {
+          console.error('Erro ao buscar informações do veículo:', quotationError);
+        }
+      }
+      
+      setOrder(purchaseOrder);
     } catch (err) {
       console.error('Erro ao carregar ordem de compra:', err);
-      toast.error('Erro ao carregar ordem de compra');
+      customToast.error('Erro ao carregar ordem de compra');
     } finally {
       setLoading(false);
     }
   };
 
-  const generatePDF = () => {
+  // Função para carregar a imagem do veículo
+  const loadVehicleImage = async () => {
+    if (!order?.quotation_id) return;
+    
+    try {
+      // Busca a cotação para obter o ID do veículo
+      const { data: quotationData, error: quotationError } = await supabase
+        .from('quotations')
+        .select('vehicle_id')
+        .eq('id', order.quotation_id)
+        .single();
+        
+      if (quotationError || !quotationData?.vehicle_id) {
+        console.error('Erro ao buscar ID do veículo:', quotationError);
+        return;
+      }
+      
+      // Busca os dados do veículo, incluindo as imagens
+      const { data: vehicleData, error: vehicleError } = await supabase
+        .from('vehicles')
+        .select('*')
+        .eq('id', quotationData.vehicle_id)
+        .single();
+        
+      if (vehicleError) {
+        console.error('Erro ao buscar veículo:', vehicleError);
+        return;
+      }
+      
+      // Usa any para acessar o campo images
+      const vehicle = vehicleData as any;
+      if (vehicle.images && Array.isArray(vehicle.images) && vehicle.images.length > 0) {
+        setVehicleImage(vehicle.images[0]);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar imagem do veículo:', error);
+    }
+  };
+
+  const generatePdf = () => {
     if (!order) return;
 
-    try {
-      const doc = new jsPDF();
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const margin = 20;
-      let y = 20;
+    const doc = new jsPDF();
+    const margin = 20;
+    let y = margin;
 
-      // Título
-      doc.setFontSize(20);
-      doc.text('ORDEM DE COMPRA', pageWidth / 2, y, { align: 'center' });
-      y += 20;
+    // Título
+    doc.setFontSize(18);
+    doc.text('ORDEM DE COMPRA', doc.internal.pageSize.width / 2, y, { align: 'center' });
+    y += 15;
 
-      // Informações do Fornecedor
-      doc.setFontSize(12);
-      doc.text(`Fornecedor: ${order.supplier?.name}`, margin, y);
+    // Informações da ordem
+    doc.setFontSize(12);
+    doc.text(`Data: ${new Date(order.created_at).toLocaleDateString()}`, margin, y);
+    y += 10;
+    doc.text(`Fornecedor: ${order.supplier?.name || 'N/A'}`, margin, y);
+    y += 10;
+    doc.text(`Status: ${order.status}`, margin, y);
+    y += 10;
+    if (order.delivery_time) {
+      doc.text(`Prazo de entrega: ${order.delivery_time}`, margin, y);
       y += 10;
-      doc.text(`Data: ${new Date(order.created_at).toLocaleDateString()}`, margin, y);
-      y += 10;
-
-      if (order.delivery_time) {
-        doc.text(`Prazo de Entrega: ${order.delivery_time}`, margin, y);
-        y += 10;
-      }
-
-      y += 10;
-
-      // Cabeçalho da Tabela
-      doc.setFillColor(240, 240, 240);
-      doc.rect(margin, y, pageWidth - 2 * margin, 10, 'F');
-      doc.text('Descrição', margin + 2, y + 7);
-      doc.text('Qtd', margin + 100, y + 7);
-      doc.text('Preço Un.', margin + 130, y + 7);
-      doc.text('Total', margin + 160, y + 7);
-      y += 15;
-
-      // Itens
-      for (const item of order.items) {
-        const description = doc.splitTextToSize(item.part_description, 90);
-        doc.text(description, margin + 2, y);
-        doc.text(item.quantity.toString(), margin + 100, y);
-        doc.text(`R$ ${item.unit_price.toFixed(2)}`, margin + 130, y);
-        doc.text(`R$ ${item.total_price.toFixed(2)}`, margin + 160, y);
-        
-        y += description.length * 7 + 5;
-
-        if (item.notes) {
-          doc.setFontSize(10);
-          const notes = doc.splitTextToSize(`Obs: ${item.notes}`, pageWidth - 2 * margin - 4);
-          doc.text(notes, margin + 4, y);
-          y += notes.length * 5;
-          doc.setFontSize(12);
-        }
-
-        y += 5;
-
-        // Adiciona nova página se necessário
-        if (y > doc.internal.pageSize.getHeight() - 30) {
-          doc.addPage();
-          y = 20;
-        }
-      }
-
-      // Total
-      y += 5;
-      doc.setFont('helvetica', 'bold');
-      doc.text('Total:', margin + 130, y);
-      doc.text(`R$ ${order.total_amount.toFixed(2)}`, margin + 160, y);
-      doc.setFont('helvetica', 'normal');
-
-      // Observações
-      if (order.notes) {
-        y += 20;
-        doc.text('Observações:', margin, y);
-        y += 7;
-        const notes = doc.splitTextToSize(order.notes, pageWidth - 2 * margin);
-        doc.text(notes, margin, y);
-      }
-
-      doc.save(`ordem-de-compra-${id}.pdf`);
-    } catch (err) {
-      console.error('Erro ao gerar PDF:', err);
-      toast.error('Erro ao gerar PDF');
     }
+    if (order.notes) {
+      doc.text(`Observações: ${order.notes}`, margin, y);
+      y += 10;
+    }
+    y += 10;
+
+    // Tabela de itens
+    const headers = ['Descrição', 'Qtd', 'Valor Unit.', 'Total'];
+    const data = order.items.map(item => [
+      item.part_description,
+      item.quantity.toString(),
+      `R$ ${item.unit_price.toFixed(2)}`,
+      `R$ ${item.total_price.toFixed(2)}`
+    ]);
+
+    // Cabeçalho da tabela
+    const colWidths = [100, 20, 30, 30];
+    let x = margin;
+    headers.forEach((header, i) => {
+      doc.text(header, x, y);
+      x += colWidths[i];
+    });
+    y += 7;
+    doc.line(margin, y, 190, y);
+    y += 7;
+
+    // Dados da tabela
+    data.forEach(row => {
+      x = margin;
+      row.forEach((cell, i) => {
+        doc.text(cell, x, y);
+        x += colWidths[i];
+      });
+      y += 10;
+    });
+
+    // Total
+    y += 5;
+    doc.line(margin, y, 190, y);
+    y += 10;
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Total: R$ ${order.total_amount.toFixed(2)}`, 160, y, { align: 'right' });
+
+    // Salva o PDF
+    doc.save(`ordem_compra_${order.id}.pdf`);
+    customToast.success('PDF gerado com sucesso!');
   };
 
   const sendToSupplier = async () => {
     if (!order?.supplier) {
-      toast.error('Fornecedor não encontrado');
+      customToast.error('Fornecedor não encontrado');
       return;
     }
 
     try {
       setSending(true);
+      
+      // Mostra notificação de "Enviando solicitações..." que será removida automaticamente
+      const toastId = customToast.loading('Enviando solicitações...');
+      
+      // Atualiza o status para "enviando"
+      const { error: updateSendingError } = await supabase
+        .from('purchase_orders')
+        .update({ status: 'sending' })
+        .eq('id', id!);
+        
+      if (updateSendingError) {
+        console.error('Erro ao atualizar status para enviando:', updateSendingError);
+      } else {
+        // Atualiza o estado local para refletir a mudança
+        setOrder(prev => prev ? {...prev, status: 'sending'} : null);
+      }
 
-      // Gera o texto da mensagem
       const items = order.items
-        .map(item => `- ${item.part_description}: ${item.quantity} un x R$ ${item.unit_price.toFixed(2)} = R$ ${item.total_price.toFixed(2)}`)
+        .map(item => `⭕ ${item.part_description}: ${item.quantity} un x R$ ${item.unit_price.toFixed(2)} = R$ ${item.total_price.toFixed(2)}`)
         .join('\n');
 
       const message = `*ORDEM DE COMPRA*\n\n` +
@@ -175,10 +296,69 @@ export function PurchaseOrderDetails() {
         (order.notes ? `Observações: ${order.notes}\n\n` : '') +
         `Por favor, confirme o recebimento.`;
 
+      let imageUrl: string | undefined = undefined;
+      let vehicleCaption: string | undefined = undefined;
+      
+      if (order.vehicle) {
+        // Buscar a imagem real do veículo
+        try {
+          // Extrair o ID do veículo da cotação associada
+          let vehicleId = '';
+          
+          if (order.quotation_id) {
+            const { data: quotationData, error: quotationError } = await supabase
+              .from('quotations')
+              .select('vehicle_id')
+              .eq('id', order.quotation_id)
+              .single();
+              
+            if (!quotationError && quotationData) {
+              vehicleId = quotationData.vehicle_id;
+            }
+          }
+          
+          if (vehicleId) {
+            const { data: vehicleData, error: vehicleError } = await supabase
+              .from('vehicles')
+              .select('*')
+              .eq('id', vehicleId)
+              .single();
+              
+            if (!vehicleError && vehicleData) {
+              // Usar any para acessar o campo images
+              const vehicle = vehicleData as any;
+              if (vehicle.images && Array.isArray(vehicle.images) && vehicle.images.length > 0) {
+                imageUrl = vehicle.images[0];
+              } else {
+                // Fallback para imagem fictícia se não encontrar
+                imageUrl = "https://via.placeholder.com/500x300?text=Veiculo+Imagem";
+              }
+            } else {
+              imageUrl = "https://via.placeholder.com/500x300?text=Veiculo+Imagem";
+            }
+          } else {
+            imageUrl = "https://via.placeholder.com/500x300?text=Veiculo+Imagem";
+          }
+        } catch (error) {
+          console.error('Erro ao buscar imagem do veículo:', error);
+          imageUrl = "https://via.placeholder.com/500x300?text=Veiculo+Imagem";
+        }
+        
+        // Cria a legenda do veículo
+        vehicleCaption = `*${order.vehicle.brand} ${order.vehicle.model} ano ${order.vehicle.year}*`;
+        console.log(`Veículo: ${vehicleCaption}`);
+      }
+
+      const user = await supabase.auth.getUser();
+      const userId = user.data.user?.id;
+
+      // Envia a mensagem com ou sem imagem
       const { error } = await sendWhatsAppMessage({
         areaCode: order.supplier.area_code,
         phone: order.supplier.phone,
-        message
+        message,
+        imageUrl,
+        userId
       });
 
       if (error) throw error;
@@ -187,15 +367,18 @@ export function PurchaseOrderDetails() {
       const { error: updateError } = await supabase
         .from('purchase_orders')
         .update({ status: 'sent' })
-        .eq('id', id);
+        .eq('id', id!);
 
       if (updateError) throw updateError;
 
-      toast.success('Ordem de compra enviada com sucesso!');
+      // Remove a notificação de "Enviando solicitações..."
+      hotToast.dismiss(toastId);
+      
+      customToast.success('Ordem de compra enviada com sucesso!');
       loadPurchaseOrder();
     } catch (err) {
       console.error('Erro ao enviar ordem de compra:', err);
-      toast.error('Erro ao enviar ordem de compra');
+      customToast.error('Erro ao enviar ordem de compra');
     } finally {
       setSending(false);
     }
@@ -203,161 +386,167 @@ export function PurchaseOrderDetails() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
+      <div className="flex justify-center items-center h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-gray-900"></div>
       </div>
     );
   }
 
   if (!order) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-lg font-medium text-gray-900">
-            Ordem de compra não encontrada
-          </h2>
-          <button
-            onClick={() => navigate(-1)}
-            className="mt-4 inline-flex items-center text-sm text-blue-500 hover:text-blue-700"
-          >
-            <ArrowLeft className="w-4 h-4 mr-1" />
-            Voltar
-          </button>
+      <div className="container mx-auto p-4">
+        <button
+          onClick={() => navigate(-1)}
+          className="mb-4 flex items-center text-blue-600 hover:text-blue-800"
+        >
+          <ArrowLeft className="mr-2" size={16} />
+          Voltar
+        </button>
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+          Ordem de compra não encontrada.
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-4xl mx-auto">
-        <div className="mb-6">
+    <div className="container mx-auto p-4">
+      <div className="flex justify-between items-center mb-6">
+        <button
+          onClick={() => navigate(-1)}
+          className="flex items-center text-blue-600 hover:text-blue-800"
+        >
+          <ArrowLeft className="mr-2" size={16} />
+          Voltar
+        </button>
+        <div className="flex space-x-2">
           <button
-            onClick={() => navigate(-1)}
-            className="inline-flex items-center text-gray-600 hover:text-gray-900"
+            onClick={generatePdf}
+            className="flex items-center bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
           >
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Voltar
+            <Download className="mr-2" size={16} />
+            Gerar PDF
           </button>
+          {order.status !== 'sent' && (
+            <button
+              onClick={sendToSupplier}
+              disabled={sending}
+              className="flex items-center bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 disabled:bg-gray-400"
+            >
+              <Send className="mr-2" size={16} />
+              {sending ? 'Enviando...' : 'Enviar ao Fornecedor'}
+            </button>
+          )}
         </div>
+      </div>
 
-        <div className="bg-white shadow rounded-lg p-6">
-          <div className="flex justify-between items-start mb-6">
+      <div className="bg-white shadow-md rounded-lg overflow-hidden">
+        <div className="p-6 border-b">
+          <h1 className="text-2xl font-bold mb-4">Ordem de Compra</h1>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <h1 className="text-2xl font-bold">Ordem de Compra</h1>
-              <p className="text-sm text-gray-500 mt-1">
-                Criada em {new Date(order.created_at).toLocaleString()}
-              </p>
-            </div>
-            <div className="space-x-2">
-              <button
-                onClick={generatePDF}
-                className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
-              >
-                <Download className="w-4 h-4 mr-2" />
-                Exportar PDF
-              </button>
-              <button
-                onClick={sendToSupplier}
-                disabled={sending || order.status === 'sent'}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {sending ? (
-                  <>
-                    <div className="w-4 h-4 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    Enviando...
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-4 h-4 mr-2" />
-                    {order.status === 'sent' ? 'Enviado' : 'Enviar ao Fornecedor'}
-                  </>
+              <p className="flex items-center">
+                <span className="font-semibold">Fornecedor:</span> 
+                {order.supplier?.phone && (
+                  <a
+                    href={`https://wa.me/55${(order.supplier.area_code + order.supplier.phone).replace(/\D/g, '')}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-2 mr-1 inline-flex items-center justify-center bg-green-500 hover:bg-green-600 text-white rounded-full p-1"
+                    title="Conversar no WhatsApp"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                  </a>
                 )}
-              </button>
-            </div>
-          </div>
-
-          {/* Informações do Fornecedor */}
-          <div className="mb-6">
-            <h2 className="text-lg font-medium mb-2">Fornecedor</h2>
-            <p className="text-gray-900">{order.supplier?.name}</p>
-            <p className="text-gray-500">
-              Telefone: ({order.supplier?.area_code}) {order.supplier?.phone}
-            </p>
-            {order.delivery_time && (
-              <p className="text-gray-500">
-                Prazo de entrega: {order.delivery_time}
+                <span className="ml-1">{order.supplier?.name}</span>
               </p>
-            )}
-          </div>
-
-          {/* Lista de Itens */}
-          <div>
-            <h2 className="text-lg font-medium mb-4">Itens</h2>
-            <div className="border rounded-lg overflow-hidden">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Descrição
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Quantidade
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Preço Un.
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Total
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {order.items.map((item) => (
-                    <tr key={item.id}>
-                      <td className="px-6 py-4">
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">
-                            {item.part_description}
-                          </div>
-                          {item.notes && (
-                            <div className="text-sm text-gray-500">
-                              {item.notes}
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-500 text-right">
-                        {item.quantity}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-500 text-right">
-                        R$ {item.unit_price.toFixed(2)}
-                      </td>
-                      <td className="px-6 py-4 text-sm font-medium text-gray-900 text-right">
-                        R$ {item.total_price.toFixed(2)}
-                      </td>
-                    </tr>
-                  ))}
-                  <tr className="bg-gray-50">
-                    <td colSpan={3} className="px-6 py-4 text-sm font-medium text-gray-900 text-right">
-                      Total
-                    </td>
-                    <td className="px-6 py-4 text-sm font-medium text-gray-900 text-right">
-                      R$ {order.total_amount.toFixed(2)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+              <p><span className="font-semibold">Data:</span> {new Date(order.created_at).toLocaleDateString()}</p>
+              {order.delivery_time && (
+                <p><span className="font-semibold">Prazo de entrega:</span> {order.delivery_time}</p>
+              )}
+            </div>
+            <div>
+              <p>
+                <span className="font-semibold">Status:</span>{' '}
+                <span className={`px-2 py-1 text-sm rounded-full ${
+                  order.status === 'pending' 
+                    ? 'bg-yellow-100 text-yellow-800'
+                    : order.status === 'sending'
+                    ? 'bg-blue-100 text-blue-800'
+                    : order.status === 'sent'
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-gray-100 text-gray-800'
+                }`}>
+                  {order.status === 'pending' ? 'Pendente' :
+                   order.status === 'sending' ? 'Enviando' :
+                   order.status === 'sent' ? 'Enviado' : order.status}
+                </span>
+              </p>
+              <p><span className="font-semibold">Total:</span> R$ {order.total_amount.toFixed(2)}</p>
+              {order.vehicle && (
+                <div>
+                  <p><span className="font-semibold">Veículo:</span> {order.vehicle.brand} {order.vehicle.model} ({order.vehicle.year})</p>
+                  {vehicleImage && (
+                    <div className="mt-2">
+                      <img 
+                        src={vehicleImage} 
+                        alt={`${order.vehicle.brand} ${order.vehicle.model}`}
+                        className="w-full max-w-xs rounded-lg shadow-md"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
-
-          {/* Observações */}
           {order.notes && (
-            <div className="mt-6">
-              <h2 className="text-lg font-medium mb-2">Observações</h2>
-              <p className="text-gray-700">{order.notes}</p>
+            <div className="mt-4">
+              <p><span className="font-semibold">Observações:</span> {order.notes}</p>
             </div>
           )}
+        </div>
+
+        <div className="p-6">
+          <h2 className="text-xl font-bold mb-4">Itens</h2>
+          <div className="overflow-x-auto">
+            <table className="min-w-full bg-white">
+              <thead>
+                <tr className="bg-gray-100">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Descrição</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantidade</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Valor Unitário</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Valor Total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {order.items.map((item) => (
+                  <tr key={item.id}>
+                    <td className="px-6 py-4">
+                      <div>
+                        <div className="text-sm font-medium text-gray-900">
+                          {item.part_description}
+                        </div>
+                        {item.notes && (
+                          <div className="text-sm text-gray-500">
+                            {item.notes}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{item.quantity}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500">R$ {item.unit_price.toFixed(2)}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500">R$ {item.total_price.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="bg-gray-50">
+                  <td colSpan={3} className="px-6 py-4 text-right font-medium">Total:</td>
+                  <td className="px-6 py-4 text-sm font-bold">R$ {order.total_amount.toFixed(2)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
         </div>
       </div>
     </div>

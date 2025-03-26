@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2, RefreshCw, Send, Edit } from 'lucide-react';
+import { ArrowLeft, Loader2, RefreshCw, Send, Edit, MessageCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { sendBulkWhatsAppMessages } from '../../services/evolutionApi';
-import { toast } from '../../lib/toast';
+import { customToast } from '../../lib/toast';
 import { useAuth } from '../../hooks/useAuth';
 import { Link } from 'react-router-dom';
 
@@ -73,6 +73,7 @@ interface QuotationRequest {
       total_price: number;
       notes?: string;
       available: boolean;
+      condition?: 'new' | 'used';
     }[];
     total_price: number;
     delivery_time?: string;
@@ -98,6 +99,7 @@ interface BestPrice {
   available: boolean;
   purchased?: boolean;
   regulation_price?: number;
+  condition?: 'new' | 'used';
 }
 
 export function QuotationDetails() {
@@ -124,6 +126,8 @@ export function QuotationDetails() {
     state: string;
   } | null>(null);
   const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null);
+  const [suppliersListCollapsed, setSuppliersListCollapsed] = useState(true);
+  const [showImages, setShowImages] = useState(false);
 
   useEffect(() => {
     // Carrega o usuário atual
@@ -155,6 +159,27 @@ export function QuotationDetails() {
         .single();
 
       if (quotationError) throw quotationError;
+
+      // Se tiver veículo mas não tiver imagens, busca as imagens do veículo
+      if (quotationData.vehicle && quotationData.vehicle_id && (!quotationData.images || quotationData.images.length === 0)) {
+        try {
+          const { data: vehicleData, error: vehicleError } = await supabase
+            .from('vehicles')
+            .select('*')
+            .eq('id', quotationData.vehicle_id)
+            .single();
+            
+          if (!vehicleError && vehicleData) {
+            // Usar any para acessar o campo images
+            const vehicle = vehicleData as any;
+            if (vehicle.images && Array.isArray(vehicle.images) && vehicle.images.length > 0) {
+              quotationData.images = vehicle.images;
+            }
+          }
+        } catch (error) {
+          console.error('Erro ao buscar imagens do veículo:', error);
+        }
+      }
 
       // Carrega as ordens de compra para esta cotação
       const { data: purchaseOrdersData, error: purchaseOrdersError } = await supabase
@@ -254,7 +279,7 @@ export function QuotationDetails() {
       setQuotationRequests(data || []);
     } catch (err) {
       console.error('Erro ao carregar solicitações:', err);
-      toast.error('Erro ao carregar respostas dos fornecedores');
+      customToast.error('Erro ao carregar respostas dos fornecedores');
     }
   };
 
@@ -274,7 +299,7 @@ export function QuotationDetails() {
       setPurchaseOrders(data || []);
     } catch (err) {
       console.error('Erro ao carregar ordens de compra:', err);
-      toast.error('Erro ao carregar ordens de compra');
+      customToast.error('Erro ao carregar ordens de compra');
     } finally {
       setLoadingOrders(false);
     }
@@ -331,7 +356,7 @@ export function QuotationDetails() {
     // Formata a lista de peças
     if (quotation.parts && quotation.parts.length > 0) {
       const partsText = quotation.parts
-        .map(part => `${part.description}
+        .map(part => `⭕ ${part.description}
 Cod. Peça: ${part.code || '-'}
 Quantidade: ${part.quantity}`)
         .join('\n\n');
@@ -347,7 +372,7 @@ Quantidade: ${part.quantity}`)
 
   const resendToSupplier = async (request: QuotationRequest) => {
     if (!quotation) {
-      toast.error('Dados da cotação não encontrados');
+      customToast.error('Dados da cotação não encontrados');
       return;
     }
 
@@ -395,11 +420,11 @@ ${message}`;
         })
         .eq('id', request.id);
 
-      toast.success(`Mensagem reenviada para ${request.supplier.name}`);
+      customToast.success(`Mensagem reenviada para ${request.supplier.name}`);
       await loadQuotationDetails();
     } catch (err: any) {
       console.error('Erro ao enviar mensagem:', err);
-      toast.error(`Erro ao enviar mensagem: ${err.message}`);
+      customToast.error(`Erro ao enviar mensagem: ${err.message}`);
       setApiLog(prev => prev + '\n❌ Erro: ' + err.message);
     } finally {
       setSendingMessages(prev => ({ ...prev, [request.supplier_id]: false }));
@@ -408,12 +433,12 @@ ${message}`;
 
   const resendToAll = async () => {
     if (!quotation || !user) {
-      toast.error('Dados da cotação não encontrados');
+      customToast.error('Dados da cotação não encontrados');
       return;
     }
 
     try {
-      setSendingToAll(true);
+      setSendingMessages({ ...sendingMessages, all: true });
       const validRequests = requests.filter(request => 
         request.supplier.area_code && 
         request.supplier.phone
@@ -470,14 +495,14 @@ ${message}`;
 
       if (error) throw error;
 
-      toast.success('Mensagens enviadas com sucesso');
+      customToast.success('Mensagens enviadas com sucesso');
       await loadQuotationDetails();
     } catch (err: any) {
       console.error('Erro ao enviar mensagens:', err);
-      toast.error(`Erro ao enviar mensagens: ${err.message}`);
+      customToast.error(`Erro ao enviar mensagens: ${err.message}`);
       setApiLog(prev => prev + '\n❌ Erro: ' + err.message);
     } finally {
-      setSendingToAll(false);
+      setSendingMessages(prev => ({ ...prev, all: false }));
     }
   };
 
@@ -554,7 +579,7 @@ ${message}`;
         if (itemsError) throw itemsError;
       }
 
-      toast.success('Ordem de compra criada com sucesso!');
+      customToast.success('Ordem de compra criada com sucesso!');
       
       // Recarrega os dados
       await loadQuotationDetails();
@@ -564,7 +589,7 @@ ${message}`;
       setSelectedParts({});
     } catch (error: any) {
       console.error('Erro ao criar ordem de compra:', error);
-      toast.error('Erro ao criar ordem de compra');
+      customToast.error('Erro ao criar ordem de compra');
     } finally {
       setCreatingOrder(false);
     }
@@ -598,7 +623,8 @@ ${message}`;
             total_price: part.total_price,
             available: true,
             purchased: quotationPart.purchased,
-            regulation_price: quotationPart.part_cost
+            regulation_price: quotationPart.part_cost,
+            condition: part.condition
           };
         }
       });
@@ -668,14 +694,26 @@ ${message}`;
         if (itemsError) throw itemsError;
       }
 
-      toast.success('Ordens de compra criadas com sucesso');
+      customToast.success('Ordens de compra criadas com sucesso');
       await loadPurchaseOrders();
       setSelectedBestPrices([]);
     } catch (err: any) {
       console.error('Erro ao criar ordens de compra:', err);
-      toast.error('Erro ao criar ordens de compra');
+      customToast.error('Erro ao criar ordens de compra');
     } finally {
       setCreatingOrder(false);
+    }
+  };
+
+  // Função para calcular a diferença percentual entre dois valores
+  const calculateDifference = (currentPrice: number, originalPrice: number) => {
+    const difference = ((currentPrice - originalPrice) / originalPrice) * 100;
+    if (difference > 0) {
+      return `+${difference.toFixed(0)}% acima`;
+    } else if (difference < 0) {
+      return `${difference.toFixed(0)}% abaixo`;
+    } else {
+      return 'Mesmo preço';
     }
   };
 
@@ -721,35 +759,64 @@ ${message}`;
         {/* Imagens do Veículo */}
         {quotation.images && quotation.images.length > 0 && (
           <div className="mb-6">
-            <h2 className="text-lg font-medium mb-2">Imagens</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {quotation.images.map((image, index) => (
-                <div key={index} className="relative">
-                  <img
-                    src={image}
-                    alt={`Imagem ${index + 1}`}
-                    className={`w-full h-32 object-cover rounded-lg cursor-pointer ${
-                      selectedImageUrl === image ? 'ring-2 ring-blue-500' : ''
-                    }`}
-                    onClick={() => handleImageSelect(image)}
-                    onError={(e) => {
-                      console.error('Erro ao carregar imagem:', e);
-                      e.currentTarget.src = '/placeholder-image.jpg';
-                    }}
-                  />
-                </div>
-              ))}
-            </div>
+            <button 
+              onClick={() => setShowImages(!showImages)} 
+              className="flex items-center text-lg font-medium mb-2 text-left w-full"
+            >
+              <span className="mr-2">{showImages ? '▼' : '►'}</span>
+              Imagens ({quotation.images.length})
+            </button>
+            
+            {showImages && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+                {quotation.images.map((image, index) => (
+                  <div key={index} className="relative">
+                    <img
+                      src={image}
+                      alt={`Imagem ${index + 1}`}
+                      className={`w-full h-32 object-cover rounded-lg cursor-pointer ${
+                        selectedImageUrl === image ? 'ring-2 ring-blue-500' : ''
+                      }`}
+                      onClick={() => handleImageSelect(image)}
+                      onError={(e) => {
+                        console.error('Erro ao carregar imagem:', e);
+                        e.currentTarget.src = '/placeholder-image.jpg';
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
         {/* Detalhes do Veículo */}
         <div className="mb-6">
           <h2 className="text-lg font-medium mb-2">Veículo</h2>
-          <p>
-            {quotation.vehicle?.brand} {quotation.vehicle?.model} {quotation.vehicle?.year}
-            {quotation.vehicle?.chassis && ` - Chassi: ${quotation.vehicle.chassis}`}
-          </p>
+          <div className="flex flex-col md:flex-row md:items-start gap-4">
+            {/* Informações do veículo */}
+            <div className="flex-1">
+              <p>
+                {quotation.vehicle?.brand} {quotation.vehicle?.model} {quotation.vehicle?.year}
+                {quotation.vehicle?.chassis && ` - Chassi: ${quotation.vehicle.chassis}`}
+              </p>
+            </div>
+            
+            {/* Imagem principal do veículo */}
+            {quotation.images && quotation.images.length > 0 && (
+              <div className="flex-shrink-0">
+                <img
+                  src={quotation.images[0]}
+                  alt={`${quotation.vehicle?.brand} ${quotation.vehicle?.model}`}
+                  className="w-full max-w-xs h-auto rounded-lg shadow-md"
+                  onError={(e) => {
+                    console.error('Erro ao carregar imagem:', e);
+                    e.currentTarget.src = '/placeholder-image.jpg';
+                  }}
+                />
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Lista de Peças */}
@@ -834,52 +901,6 @@ ${message}`;
           </div>
         </div>
 
-        {/* Lista de Fornecedores */}
-        <div>
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-medium">Fornecedores</h2>
-            <button
-              onClick={resendToAll}
-              disabled={Object.values(sendingMessages).some(Boolean)}
-              className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50 mr-4"
-            >
-              <RefreshCw className="w-4 h-4 mr-2" />
-              Reenviar para Todos
-            </button>
-          </div>
-
-          <div className="space-y-4">
-            {requests.map((request) => (
-              <div key={request.id} className="border rounded-lg p-4">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="font-medium">{request.supplier.name}</p>
-                    <p className="text-sm text-gray-600">
-                      ({request.supplier.area_code}) {request.supplier.phone}
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      Status: {request.status}
-                      {request.sent_at && ` - Enviado em: ${new Date(request.sent_at).toLocaleString()}`}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => resendToSupplier(request)}
-                    disabled={sendingMessages[request.supplier_id]}
-                    className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {sendingMessages[request.supplier_id] ? (
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    ) : (
-                      <Send className="w-4 h-4 mr-2" />
-                    )}
-                    Reenviar
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
         {/* Respostas dos Fornecedores */}
         {quotationRequests.length > 0 && (
           <div className="bg-white shadow rounded-lg p-6 mb-6">
@@ -896,18 +917,62 @@ ${message}`;
                       }
                     }}
                   >
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <h3 className="font-medium">
-                          {request.response_data?.supplier_name || request.supplier?.name}
-                        </h3>
-                        <p className="text-sm text-gray-500">
-                          Respondido em: {new Date(request.responded_at!).toLocaleString()}
+                    <div className="flex justify-between items-start">
+                      <div className="flex flex-col">
+                        <div className="flex items-center">
+                          {/* Botão do WhatsApp */}
+                          {request.supplier.phone && (
+                            <a
+                              href={`https://wa.me/55${(request.supplier.area_code + request.supplier.phone).replace(/\D/g, '')}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mr-2 inline-flex items-center justify-center bg-green-500 hover:bg-green-600 text-white rounded-full p-1"
+                              title="Conversar no WhatsApp"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <MessageCircle className="w-4 h-4" />
+                            </a>
+                          )}
+                          <p className="font-medium">{request.supplier.name}</p>
+                        </div>
+                        <p className="text-sm text-gray-600">
+                          ({request.supplier.area_code}) {request.supplier.phone}
+                        </p>
+                        <p className="text-sm text-gray-600">
+                          Respondido em: {new Date(request.responded_at || '').toLocaleString()}
                         </p>
                       </div>
-                      <p className="text-lg font-medium">
-                        Total: R$ {request.response_data?.total_price.toFixed(2)}
-                      </p>
+                      <div className="flex flex-col items-end">
+                        <p className="text-lg font-medium">
+                          Total: R$ {request.response_data?.total_price.toFixed(2)}
+                        </p>
+                        {request.response_data?.parts && (
+                          <div className="text-sm mt-1">
+                            <div className="flex gap-2">
+                              <span className="text-green-600 font-medium">
+                                {request.response_data.parts.filter(part => part.available).length} disponíveis
+                              </span>
+                              <span className="text-gray-400">|</span>
+                              <span className="text-red-600 font-medium">
+                                {request.response_data.parts.filter(part => !part.available).length} faltantes
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex items-center mt-1">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              resendToSupplier(request);
+                            }}
+                            disabled={sendingMessages[request.supplier_id]}
+                            className="text-blue-600 hover:text-blue-800 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Reenviar solicitação"
+                          >
+                            <RefreshCw className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -948,6 +1013,20 @@ ${message}`;
                                   <div>
                                     <p className="text-sm font-medium">{part.description}</p>
                                     <p className="text-sm text-gray-500">Quantidade: {part.quantity}</p>
+                                    {!part.available && (
+                                      <p className="text-sm text-red-500 mt-1">Peça não disponível</p>
+                                    )}
+                                    {isPurchased && (
+                                      <p className="text-sm text-green-600 mt-1">Peça já comprada</p>
+                                    )}
+                                    {part.notes && (
+                                      <p className="text-sm text-gray-500 mt-1">{part.notes}</p>
+                                    )}
+                                    {part.condition && part.available && (
+                                      <p className={`text-sm mt-1 ${part.condition === 'new' ? 'text-blue-600' : 'text-amber-600'}`}>
+                                        Condição: {part.condition === 'new' ? 'Nova' : 'Usada'}
+                                      </p>
+                                    )}
                                   </div>
                                   <div className="text-right">
                                     <p className="text-sm font-medium">
@@ -963,15 +1042,6 @@ ${message}`;
                                     </p>
                                   </div>
                                 </div>
-                                {!part.available && (
-                                  <p className="text-sm text-red-500 mt-1">Peça não disponível</p>
-                                )}
-                                {isPurchased && (
-                                  <p className="text-sm text-green-600 mt-1">Peça já comprada</p>
-                                )}
-                                {part.notes && (
-                                  <p className="text-sm text-gray-500 mt-1">{part.notes}</p>
-                                )}
                               </div>
                             </div>
                           </div>
@@ -1027,6 +1097,47 @@ ${message}`;
                 )}
               </button>
             </div>
+
+            {/* Total do pacote ideal */}
+            {(() => {
+              const totalPacoteIdeal = Object.values(
+                bestPrices.reduce((acc, part) => {
+                  const supplierId = part.supplier.id;
+                  if (!acc[supplierId]) {
+                    acc[supplierId] = {
+                      total: 0
+                    };
+                  }
+                  acc[supplierId].total += part.total_price;
+                  return acc;
+                }, {} as Record<string, { total: number }>)
+              ).reduce((sum, item) => sum + item.total, 0);
+
+              // Verificar se há peças faltantes
+              const pecasFaltantes = quotation?.parts?.filter(part => {
+                // Verifica se a peça não está em nenhum fornecedor do pacote ideal
+                return !bestPrices.some(bestPrice => 
+                  bestPrice.description === part.description
+                );
+              }) || [];
+
+              return (
+                <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium">Total: </span>
+                    <span className="font-bold text-lg">
+                      {totalPacoteIdeal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </span>
+                  </div>
+                  
+                  {pecasFaltantes.length > 0 && (
+                    <div className="mt-2 text-red-600 text-sm">
+                      {pecasFaltantes.length} peça{pecasFaltantes.length > 1 ? 's' : ''} faltante{pecasFaltantes.length > 1 ? 's' : ''}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             <div className="space-y-6">
               {Object.entries(
@@ -1108,6 +1219,11 @@ ${message}`;
                                             (-{((part.regulation_price - part.unit_price) / part.regulation_price * 100).toFixed(0)}%)
                                           </span>
                                         )}
+                                      </p>
+                                    )}
+                                    {part.condition && (
+                                      <p className={`text-sm mt-1 ${part.condition === 'new' ? 'text-blue-600' : 'text-amber-600'}`}>
+                                        Condição: {part.condition === 'new' ? 'Nova' : 'Usada'}
                                       </p>
                                     )}
                                   </div>
@@ -1199,6 +1315,91 @@ ${message}`;
             </pre>
           </div>
         )}
+
+        {/* Lista de Fornecedores */}
+        <div className="mb-6">
+          <div 
+            className={`flex justify-between items-center p-3 cursor-pointer rounded-lg transition-colors duration-200 ${suppliersListCollapsed ? 'bg-gray-100 hover:bg-gray-200' : 'mb-4'}`}
+            onClick={() => setSuppliersListCollapsed(!suppliersListCollapsed)}
+          >
+            <div className="flex items-center">
+              {suppliersListCollapsed ? (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-600 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-600 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                </svg>
+              )}
+              <h2 className="text-lg font-medium">Fornecedores</h2>
+              <span className="ml-2 text-sm text-gray-500">({requests.length})</span>
+            </div>
+            <div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  resendToAll();
+                }}
+                disabled={Object.values(sendingMessages).some(Boolean)}
+                className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50"
+              >
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Reenviar para Todos
+              </button>
+            </div>
+          </div>
+
+          {!suppliersListCollapsed && (
+            <div className="space-y-4">
+              {requests.map((request) => (
+                <div key={request.id} className="border rounded-lg p-4">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="flex items-center">
+                        {/* Botão do WhatsApp */}
+                        {request.supplier.phone && (
+                          <a
+                            href={`https://wa.me/55${(request.supplier.area_code + request.supplier.phone).replace(/\D/g, '')}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mr-2 inline-flex items-center justify-center bg-green-500 hover:bg-green-600 text-white rounded-full p-1"
+                            title="Conversar no WhatsApp"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <MessageCircle className="w-4 h-4" />
+                          </a>
+                        )}
+                        <p className="font-medium">{request.supplier.name}</p>
+                      </div>
+                      <p className="text-sm text-gray-600">
+                        ({request.supplier.area_code}) {request.supplier.phone}
+                      </p>
+                      <p className="text-sm text-gray-600">
+                        Status: {request.status}
+                        {request.sent_at && ` - Enviado em: ${new Date(request.sent_at).toLocaleString()}`}
+                      </p>
+                    </div>
+                    <div className="flex items-center">
+                      <button
+                        onClick={() => resendToSupplier(request)}
+                        disabled={sendingMessages[request.supplier_id]}
+                        className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {sendingMessages[request.supplier_id] ? (
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        ) : (
+                          <MessageCircle className="w-4 h-4 mr-2" />
+                        )}
+                        Reenviar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

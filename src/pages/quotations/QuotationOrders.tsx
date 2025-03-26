@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { ArrowLeft, Loader2, FileText, Printer } from 'lucide-react';
-import { toast } from 'react-hot-toast';
+import { customToast } from '../../lib/toast';
 
 interface PurchaseOrder {
   id: string;
@@ -54,7 +54,7 @@ export default function QuotationOrders() {
       setOrders(data || []);
     } catch (err) {
       console.error('Erro ao carregar ordens:', err);
-      toast.error('Erro ao carregar ordens');
+      customToast.error('Erro ao carregar ordens');
     } finally {
       setLoading(false);
     }

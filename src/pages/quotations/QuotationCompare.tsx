@@ -17,6 +17,7 @@ interface QuotationResponse {
       notes?: string;
       delivery_time?: string;
       available: boolean;
+      condition?: 'new' | 'used';
     }[];
     total_price: number;
     delivery_time?: string;
@@ -50,19 +51,18 @@ export default function QuotationCompare() {
 
   const loadData = async () => {
     try {
+      setLoading(true);
+
       // Carrega a cotação
       const { data: quotationData, error: quotationError } = await supabase
         .from('quotations')
-        .select(`
-          *,
-          vehicle:vehicles(*)
-        `)
+        .select('*, vehicles(*)')
         .eq('id', id)
         .single();
 
       if (quotationError) throw quotationError;
 
-      // Carrega as respostas
+      // Carrega as respostas com todos os dados necessários
       const { data: responsesData, error: responsesError } = await supabase
         .from('quotation_requests')
         .select('*')
@@ -70,6 +70,16 @@ export default function QuotationCompare() {
         .eq('status', 'responded');
 
       if (responsesError) throw responsesError;
+
+      console.log('Respostas carregadas:', JSON.stringify(responsesData, null, 2));
+      
+      // Verificar se as respostas têm os dados completos
+      if (responsesData && responsesData.length > 0) {
+        responsesData.forEach((response, index) => {
+          console.log(`Resposta ${index} completa:`, JSON.stringify(response, null, 2));
+          console.log(`Response data:`, JSON.stringify(response.response_data, null, 2));
+        });
+      }
 
       setQuotation(quotationData);
       setResponses(responsesData || []);
@@ -220,42 +230,66 @@ export default function QuotationCompare() {
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {quotation.parts.map((part: any, index: number) => (
-                <tr key={index}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {part.description}
-                    <br />
-                    <span className="text-gray-500">Qtd: {part.quantity}</span>
-                  </td>
-                  {responses.map(response => {
-                    const responsePart = response.response_data.parts[index];
-                    return (
-                      <td key={response.id} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {responsePart?.available ? (
-                          <div className="space-y-1">
-                            <p>R$ {responsePart.unit_price.toFixed(2)} / un</p>
-                            <p>Total: R$ {responsePart.total_price.toFixed(2)}</p>
-                            {responsePart.delivery_time && (
-                              <p>Prazo: {responsePart.delivery_time}</p>
-                            )}
-                            <label className="inline-flex items-center mt-2">
-                              <input
-                                type="checkbox"
-                                checked={selectedParts.some(
-                                  p => p.requestId === response.id && p.partIndex === index
-                                )}
-                                onChange={e => handlePartSelect(response.id, index, e.target.checked)}
-                                className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
-                              />
-                              <span className="ml-2">Selecionar</span>
-                            </label>
-                          </div>
-                        ) : (
-                          <span className="text-red-500">Não disponível</span>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
+                <React.Fragment key={index}>
+                  <tr>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      {part.description}
+                      <br />
+                      <span className="text-gray-500">Qtd: {part.quantity}</span>
+                    </td>
+                    {responses.map(response => {
+                      const responsePart = response.response_data.parts[index];
+                      console.log('RESPOSTA COMPLETA:', response);
+                      console.log('DADOS DA PEÇA:', responsePart);
+                      
+                      return (
+                        <td key={response.id} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {responsePart?.available ? (
+                            <div className="space-y-1">
+                              <p>R$ {responsePart.unit_price.toFixed(2)} / un</p>
+                              <p>Total: R$ {responsePart.total_price.toFixed(2)}</p>
+                              {responsePart.delivery_time && (
+                                <p>Prazo: {responsePart.delivery_time}</p>
+                              )}
+                              <label className="inline-flex items-center mt-2">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedParts.some(
+                                    p => p.requestId === response.id && p.partIndex === index
+                                  )}
+                                  onChange={e => handlePartSelect(response.id, index, e.target.checked)}
+                                  className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
+                                />
+                                <span className="ml-2">Selecionar</span>
+                              </label>
+                            </div>
+                          ) : (
+                            <p className="text-red-500">Não disponível</p>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                  <tr className="bg-blue-50">
+                    <td className="px-6 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
+                      Condição da Peça
+                    </td>
+                    {responses.map(response => {
+                      const responsePart = response.response_data.parts[index];
+                      return (
+                        <td key={response.id} className="px-6 py-2 whitespace-nowrap text-sm font-bold">
+                          {responsePart?.available ? (
+                            <span className={responsePart.condition === 'new' ? 'text-blue-700' : 'text-amber-700'}>
+                              {responsePart.condition === 'new' ? 'NOVA' : 'USADA'}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                </React.Fragment>
               ))}
               {/* Linha de Totais */}
               <tr className="bg-gray-50">

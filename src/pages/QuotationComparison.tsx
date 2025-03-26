@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { toast } from '../lib/toast';
+import { customToast } from '../lib/toast';
 import { ArrowLeft } from 'lucide-react';
 
 interface Part {
@@ -159,7 +159,7 @@ export function QuotationComparison() {
       setUniqueParts(Array.from(parts));
     } catch (err) {
       console.error('Erro ao carregar solicitações:', err);
-      toast.error('Erro ao carregar respostas dos fornecedores');
+      customToast.error('Erro ao carregar respostas dos fornecedores');
     } finally {
       setLoading(false);
     }

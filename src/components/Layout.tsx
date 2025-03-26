@@ -2,7 +2,7 @@ import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { FileText, Users, Menu, X, Settings, Building2, MessageCircle, LogOut } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
-import { toast } from '../lib/toast';
+import { customToast } from '../lib/toast';
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
@@ -15,7 +15,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       await signOut();
       navigate('/login');
     } catch (error) {
-      toast.error('Erro ao fazer logout');
+      customToast.error('Erro ao fazer logout');
     }
   };
 

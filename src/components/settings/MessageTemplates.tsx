@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { toast } from '../../lib/toast';
+import { customToast } from '../../lib/toast';
 import { useAuth } from '../../hooks/useAuth';
 
 interface MessageTemplate {
@@ -10,6 +10,8 @@ interface MessageTemplate {
   content: string;
   is_default: boolean;
   sequence: number;
+  user_id?: string;
+  created_at?: string;
 }
 
 export function MessageTemplates() {
@@ -35,7 +37,7 @@ export function MessageTemplates() {
       setTemplates(data || []);
     } catch (err) {
       console.error('Erro ao carregar templates:', err);
-      toast.error('Erro ao carregar templates');
+      customToast.error('Erro ao carregar templates');
     } finally {
       setLoading(false);
     }
@@ -55,7 +57,8 @@ export function MessageTemplates() {
       : templates[currentIndex + 1].sequence;
 
     try {
-      const { error } = await supabase.rpc(
+      // First update other templates' sequences
+      const { error: rpcError } = await supabase.rpc(
         direction === 'up' ? 'update_template_sequences_up' : 'update_template_sequences_down',
         {
           p_template_id: template.id,
@@ -64,20 +67,28 @@ export function MessageTemplates() {
         }
       );
 
-      if (error) throw error;
+      if (rpcError) throw rpcError;
+
+      // Then update the current template's sequence
+      const { error: updateError } = await supabase
+        .from('message_templates')
+        .update({ sequence: newSequence })
+        .eq('id', template.id);
+
+      if (updateError) throw updateError;
 
       await loadTemplates();
-      toast.success('Ordem atualizada com sucesso');
+      customToast.success('Ordem atualizada com sucesso');
     } catch (err) {
       console.error('Erro ao atualizar ordem:', err);
-      toast.error('Erro ao atualizar ordem');
+      customToast.error('Erro ao atualizar ordem');
     }
   };
 
   const handleSave = async () => {
     if (!editingTemplate) return;
     if (!editingTemplate.name.trim() || !editingTemplate.content.trim()) {
-      toast.error('Por favor, preencha o nome e o conteúdo do template');
+      customToast.error('Por favor, preencha o nome e o conteúdo do template');
       return;
     }
 
@@ -91,24 +102,38 @@ export function MessageTemplates() {
         sequence = maxSequence + 1;
       }
 
-      const { error } = await supabase
-        .from('message_templates')
-        .upsert({
-          id: editingTemplate.id,
-          name: editingTemplate.name,
-          content: editingTemplate.content,
-          sequence,
-          user_id: user?.id
-        });
+      // Create a new template object with required fields
+      const templateData = {
+        name: editingTemplate.name,
+        content: editingTemplate.content,
+        sequence,
+        user_id: user?.id || '',
+        is_default: editingTemplate.is_default || false
+      };
 
-      if (error) throw error;
+      // If we have an ID, it's an update
+      if (editingTemplate.id) {
+        const { error } = await supabase
+          .from('message_templates')
+          .update(templateData)
+          .eq('id', editingTemplate.id);
 
-      toast.success('Template salvo com sucesso');
+        if (error) throw error;
+      } else {
+        // Otherwise it's an insert
+        const { error } = await supabase
+          .from('message_templates')
+          .insert(templateData);
+
+        if (error) throw error;
+      }
+
+      customToast.success('Template salvo com sucesso');
       setEditingTemplate(null);
       await loadTemplates();
     } catch (err) {
       console.error('Erro ao salvar template:', err);
-      toast.error('Erro ao salvar template');
+      customToast.error('Erro ao salvar template');
     } finally {
       setSaving(false);
     }
@@ -116,7 +141,7 @@ export function MessageTemplates() {
 
   const handleDelete = async (template: MessageTemplate) => {
     if (template.is_default) {
-      toast.error('Não é possível excluir o template padrão');
+      customToast.error('Não é possível excluir o template padrão');
       return;
     }
 
@@ -130,17 +155,17 @@ export function MessageTemplates() {
 
       if (error) throw error;
 
-      toast.success('Template excluído com sucesso');
+      customToast.success('Template excluído com sucesso');
       await loadTemplates();
     } catch (err) {
       console.error('Erro ao excluir template:', err);
-      toast.error('Erro ao excluir template');
+      customToast.error('Erro ao excluir template');
     }
   };
 
   const createNewTemplate = () => {
     setEditingTemplate({
-      id: crypto.randomUUID(),
+      id: '',
       name: '',
       content: '',
       is_default: false,

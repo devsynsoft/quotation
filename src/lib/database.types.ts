@@ -66,6 +66,198 @@ export interface Database {
         }
         Relationships: []
       }
+      message_templates: {
+        Row: {
+          id: string
+          name: string
+          content: string
+          is_default: boolean
+          sequence: number
+          user_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          content: string
+          is_default?: boolean
+          sequence: number
+          user_id: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          content?: string
+          is_default?: boolean
+          sequence?: number
+          user_id?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_templates_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      purchase_orders: {
+        Row: {
+          id: string
+          created_at: string
+          quotation_id: string
+          supplier_id: string
+          status: string
+          total_amount: number
+          notes?: string
+          delivery_time?: string
+        }
+        Insert: {
+          id?: string
+          created_at?: string
+          quotation_id: string
+          supplier_id: string
+          status: string
+          total_amount: number
+          notes?: string
+          delivery_time?: string
+        }
+        Update: {
+          id?: string
+          created_at?: string
+          quotation_id?: string
+          supplier_id?: string
+          status?: string
+          total_amount?: number
+          notes?: string
+          delivery_time?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchase_orders_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_quotation_id_fkey"
+            columns: ["quotation_id"]
+            isOneToOne: false
+            referencedRelation: "quotations"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      purchase_order_items: {
+        Row: {
+          id: string
+          purchase_order_id: string
+          part_description: string
+          quantity: number
+          unit_price: number
+          total_price: number
+          notes?: string
+        }
+        Insert: {
+          id?: string
+          purchase_order_id: string
+          part_description: string
+          quantity: number
+          unit_price: number
+          total_price: number
+          notes?: string
+        }
+        Update: {
+          id?: string
+          purchase_order_id?: string
+          part_description?: string
+          quantity?: number
+          unit_price?: number
+          total_price?: number
+          notes?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchase_order_items_purchase_order_id_fkey"
+            columns: ["purchase_order_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      quotation_requests: {
+        Row: {
+          id: string
+          quotation_id: string
+          supplier_id: string
+          status: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          quotation_id: string
+          supplier_id: string
+          status: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          quotation_id?: string
+          supplier_id?: string
+          status?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quotation_requests_quotation_id_fkey"
+            columns: ["quotation_id"]
+            isOneToOne: false
+            referencedRelation: "quotations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quotation_requests_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      quotations: {
+        Row: {
+          id: string
+          vehicle_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          vehicle_id: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          vehicle_id?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quotations_vehicle_id_fkey"
+            columns: ["vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       suppliers: {
         Row: {
           id: string
@@ -128,6 +320,30 @@ export interface Database {
           }
         ]
       }
+      vehicles: {
+        Row: {
+          id: string
+          brand: string
+          model: string
+          year: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          brand: string
+          model: string
+          year: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          brand?: string
+          model?: string
+          year?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
       whatsapp_configs: {
         Row: {
           id: string
@@ -168,7 +384,22 @@ export interface Database {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      update_template_sequences_up: {
+        Args: {
+          p_template_id: string
+          p_old_sequence: number
+          p_new_sequence: number
+        }
+        Returns: void
+      }
+      update_template_sequences_down: {
+        Args: {
+          p_template_id: string
+          p_old_sequence: number
+          p_new_sequence: number
+        }
+        Returns: void
+      }
     }
     Enums: {
       [_ in never]: never

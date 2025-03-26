@@ -10,10 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.0",
     "@supabase/supabase-js": "^2.39.7",
     "jspdf": "^2.5.2",
     "lucide-react": "^0.344.0",
     "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^5.0.375",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-dropzone": "^14.3.5",

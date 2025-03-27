@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Search, X, Trash2, Loader2 } from 'lucide-react';
+import { Plus, Search, X, Trash2, Loader2, MessageCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { Database } from '../../lib/database.types';
 import { AddSupplierModal } from './AddSupplierModal';
@@ -510,13 +510,25 @@ export function SupplierList() {
                     {specializationLabels[supplier.specialization as keyof typeof specializationLabels]}
                   </span>
                 </div>
-                <button
-                  onClick={(e) => handleDelete(e, supplier.id)}
-                  className="p-1 hover:bg-red-100 rounded-full transition-colors"
-                  title="Excluir fornecedor"
-                >
-                  <Trash2 className="h-5 w-5 text-red-500" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <a 
+                    href={`https://wa.me/55${supplier.area_code}${supplier.phone.replace(/\D/g, '')}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="p-1 hover:bg-green-100 rounded-full transition-colors"
+                    title="Enviar mensagem via WhatsApp"
+                  >
+                    <MessageCircle className="h-5 w-5 text-green-500" />
+                  </a>
+                  <button
+                    onClick={(e) => handleDelete(e, supplier.id)}
+                    className="p-1 hover:bg-red-100 rounded-full transition-colors"
+                    title="Excluir fornecedor"
+                  >
+                    <Trash2 className="h-5 w-5 text-red-500" />
+                  </button>
+                </div>
               </div>
             </div>
           ))}

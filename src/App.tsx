@@ -26,6 +26,10 @@ import CounterOfferResponse from './pages/CounterOfferResponse';
 import { SettingsPage } from './components/settings/SettingsPage';
 import { QuotationComparison } from './pages/QuotationComparison';
 import { PurchaseOrderDetails } from './pages/PurchaseOrderDetails';
+import WorkshopList from './pages/workshops/WorkshopList';
+import WorkshopForm from './pages/workshops/WorkshopForm';
+import BillingCompanyList from './pages/billing/BillingCompanyList';
+import BillingCompanyForm from './pages/billing/BillingCompanyForm';
 
 function ProtectedRoutes() {
   const { user } = React.useContext(AuthContext);
@@ -53,6 +57,14 @@ function ProtectedRoutes() {
           <Route path="/purchase-orders/:id" element={<PurchaseOrderDetails />} />
           <Route path="/admin/companies" element={<CompanyList />} />
           <Route path="/admin/companies/new" element={<CompanyForm />} />
+          {/* Rotas de Oficinas */}
+          <Route path="/workshops" element={<WorkshopList />} />
+          <Route path="/workshops/new" element={<WorkshopForm />} />
+          <Route path="/workshops/edit/:id" element={<WorkshopForm />} />
+          {/* Rotas de Empresas para Faturamento */}
+          <Route path="/billing" element={<BillingCompanyList />} />
+          <Route path="/billing/new" element={<BillingCompanyForm />} />
+          <Route path="/billing/edit/:id" element={<BillingCompanyForm />} />
           {/* Rotas de Configuração */}
           <Route path="/settings/whatsapp" element={<WhatsAppSettings />} />
           <Route path="/settings/company" element={<CompanyConfig />} />

@@ -15,6 +15,16 @@ interface MessageTemplate {
   sequence: number;
 }
 
+interface SendWhatsAppMessageParams {
+  areaCode: string;
+  phone: string;
+  message: string;
+  userId?: string;
+  imageUrl?: string;
+  documentUrl?: string;
+  useTemplates?: boolean;
+}
+
 export async function getWhatsAppConfig(userId: string): Promise<WhatsAppConfig | null> {
   try {
     const { data: configs, error: configError } = await supabase
@@ -72,15 +82,9 @@ export async function sendWhatsAppMessage({
   message,
   userId,
   imageUrl,
+  documentUrl,
   useTemplates = false
-}: {
-  areaCode: string;
-  phone: string;
-  message: string;
-  userId?: string;
-  imageUrl?: string;
-  useTemplates?: boolean;
-}): Promise<{ error?: Error }> {
+}: SendWhatsAppMessageParams): Promise<{ error?: Error }> {
   try {
     const config = await getWhatsAppConfig(userId || (await supabase.auth.getUser()).data.user?.id || '');
     if (!config) {
@@ -221,6 +225,48 @@ export async function sendWhatsAppMessage({
       }
     }
 
+    // Se houver documento PDF, envia depois das mensagens de texto e imagem
+    if (documentUrl) {
+      console.log('Tentando enviar documento PDF:', {
+        phone: fullPhone
+      });
+
+      // Se o documentUrl estiver no formato data URI (data:application/pdf;base64,XXXXX),
+      // extrair apenas a parte base64
+      let documentData = documentUrl;
+      if (documentUrl.startsWith('data:application/pdf;base64,')) {
+        documentData = documentUrl.replace('data:application/pdf;base64,', '');
+        console.log('Documento convertido para formato base64');
+      }
+
+      const documentResponse = await fetch(`${baseUrl}/message/sendMedia/${config.instance_name}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': config.evolution_api_key
+        },
+        body: JSON.stringify({
+          number: fullPhone,
+          media: documentData,
+          mediatype: 'document',
+          fileName: 'ordem_de_compra.pdf',
+          caption: 'Ordem de Compra - PDF'
+        })
+      });
+
+      const responseDocumentData = await documentResponse.json().catch(() => null);
+      console.log('Resposta do envio do documento:', responseDocumentData);
+
+      if (!documentResponse.ok) {
+        console.error('Erro ao enviar documento:', {
+          status: documentResponse.status,
+          statusText: documentResponse.statusText,
+          data: responseDocumentData
+        });
+        throw new Error(`Erro ao enviar documento: ${documentResponse.statusText}`);
+      }
+    }
+
     return {};
   } catch (error) {
     console.error('Erro ao enviar mensagem:', error);
@@ -229,7 +275,7 @@ export async function sendWhatsAppMessage({
 }
 
 export async function sendBulkWhatsAppMessages(
-  messages: { areaCode: string; phone: string; message: string; imageUrl?: string }[],
+  messages: { areaCode: string; phone: string; message: string; imageUrl?: string; documentUrl?: string }[],
   userId: string
 ): Promise<{ success: boolean; errors: Error[] }> {
   const errors: Error[] = [];

@@ -114,6 +114,8 @@ export interface Database {
           total_amount: number
           notes?: string
           delivery_time?: string
+          workshop_id?: string
+          billing_company_id?: string
         }
         Insert: {
           id?: string
@@ -124,6 +126,8 @@ export interface Database {
           total_amount: number
           notes?: string
           delivery_time?: string
+          workshop_id?: string
+          billing_company_id?: string
         }
         Update: {
           id?: string
@@ -134,6 +138,8 @@ export interface Database {
           total_amount?: number
           notes?: string
           delivery_time?: string
+          workshop_id?: string
+          billing_company_id?: string
         }
         Relationships: [
           {
@@ -148,6 +154,20 @@ export interface Database {
             columns: ["quotation_id"]
             isOneToOne: false
             referencedRelation: "quotations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_workshop_id_fkey"
+            columns: ["workshop_id"]
+            isOneToOne: false
+            referencedRelation: "workshops"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_billing_company_id_fkey"
+            columns: ["billing_company_id"]
+            isOneToOne: false
+            referencedRelation: "billing_companies"
             referencedColumns: ["id"]
           }
         ]
@@ -436,6 +456,123 @@ export interface Database {
             referencedColumns: ["id"]
           }
         ]
+      }
+      workshops: {
+        Row: {
+          id: string
+          name: string
+          phone: string
+          email: string
+          state: string
+          city: string
+          street: string
+          number: string
+          complement?: string
+          neighborhood: string
+          zip_code: string
+          contact_person: string
+          is_active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          phone: string
+          email: string
+          state: string
+          city: string
+          street: string
+          number: string
+          complement?: string
+          neighborhood: string
+          zip_code: string
+          contact_person: string
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          phone?: string
+          email?: string
+          state?: string
+          city?: string
+          street?: string
+          number?: string
+          complement?: string
+          neighborhood?: string
+          zip_code?: string
+          contact_person?: string
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      billing_companies: {
+        Row: {
+          id: string
+          company_name: string
+          trading_name: string
+          cnpj: string
+          state_registration: string
+          email: string
+          phone: string
+          state: string
+          city: string
+          street: string
+          number: string
+          complement?: string
+          neighborhood: string
+          zip_code: string
+          contact_person: string
+          is_active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          company_name: string
+          trading_name: string
+          cnpj: string
+          state_registration: string
+          email: string
+          phone: string
+          state: string
+          city: string
+          street: string
+          number: string
+          complement?: string
+          neighborhood: string
+          zip_code: string
+          contact_person: string
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          company_name?: string
+          trading_name?: string
+          cnpj?: string
+          state_registration?: string
+          email?: string
+          phone?: string
+          state?: string
+          city?: string
+          street?: string
+          number?: string
+          complement?: string
+          neighborhood?: string
+          zip_code?: string
+          contact_person?: string
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
     }
     Views: {

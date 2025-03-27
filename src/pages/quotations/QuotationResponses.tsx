@@ -20,6 +20,7 @@ interface QuotationResponse {
       available?: boolean;
       delivery_time?: string;
       notes?: string;
+      negotiated?: boolean;
     }>;
     total_price?: number;
     delivery_time?: string;
@@ -37,6 +38,7 @@ interface Part {
   available?: boolean;
   delivery_time?: string;
   notes?: string;
+  negotiated?: boolean;
 }
 
 const QuotationResponses: React.FC = () => {
@@ -202,7 +204,14 @@ const QuotationResponses: React.FC = () => {
                 <div className="mt-4 space-y-4">
                   {response.response_data.parts?.map((part, index) => (
                     <div key={index} className="border-t pt-4">
-                      <h4 className="font-medium">{part.description}</h4>
+                      <div className="flex justify-between items-center">
+                        <h4 className="font-medium">{part.description}</h4>
+                        {part.negotiated && (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                            Negociado
+                          </span>
+                        )}
+                      </div>
                       <div className="mt-2 grid grid-cols-2 gap-4">
                         <div>
                           <p className="text-sm text-gray-500">Quantidade: {part.quantity}</p>

@@ -19,6 +19,7 @@ interface PartResponse {
   delivery_time?: string;
   available: boolean;
   condition: 'new' | 'used';
+  negotiated?: boolean;
 }
 
 interface Quotation {
@@ -145,23 +146,41 @@ const QuotationResponse = () => {
       await loadQuotation(id!, requestId!, true);
 
       // Inicializa a resposta com os dados da contraproposta
-      const counterOfferParts = counterOfferData.counter_offer_data.parts.map(part => ({
-        ...part,
-        accepted: part.accepted !== undefined ? part.accepted : true
-      }));
+      if (counterOfferData.counter_offer_data && typeof counterOfferData.counter_offer_data === 'object' && 'parts' in counterOfferData.counter_offer_data) {
+        // Filtra apenas as peças disponíveis
+        const counterOfferParts = (counterOfferData.counter_offer_data.parts as any[])
+          .filter((part: any) => part.available !== false) // Inclui apenas peças disponíveis
+          .map((part: any) => ({
+            description: part.description,
+            quantity: part.quantity,
+            unit_price: part.counter_price || part.unit_price,
+            total_price: part.counter_total || part.total_price,
+            condition: part.condition,
+            available: true,
+            delivery_time: part.delivery_time,
+            notes: part.notes,
+            accepted: part.accepted !== undefined ? part.accepted : true,
+            original_price: part.original_price || part.unit_price,
+            original_total: part.original_total || part.total_price,
+            counter_price: part.counter_price || part.unit_price,
+            counter_total: part.counter_total || part.total_price,
+            discount_percentage: part.discount_percentage || 0,
+            negotiated: true
+          }));
 
-      setResponse({
-        quotation_id: id || '',
-        supplier_name: counterOfferData.counter_offer_data.supplier_name,
-        supplier_phone: counterOfferData.counter_offer_data.supplier_phone,
-        parts: counterOfferParts,
-        total_price: calculateAcceptedTotal(counterOfferParts),
-        delivery_time: counterOfferData.counter_offer_data.delivery_time || '',
-        notes: counterOfferData.counter_offer_data.notes || ''
-      });
+        setResponse({
+          quotation_id: id || '',
+          supplier_name: counterOfferData.counter_offer_data.supplier_name,
+          supplier_phone: counterOfferData.counter_offer_data.supplier_phone,
+          parts: counterOfferParts,
+          total_price: calculateAcceptedTotal(counterOfferParts),
+          delivery_time: counterOfferData.counter_offer_data.delivery_time || '',
+          notes: counterOfferData.counter_offer_data.notes || ''
+        });
 
-      if (counterOfferData.status === 'responded') {
-        setSubmitted(true);
+        if (counterOfferData.status === 'responded') {
+          setSubmitted(true);
+        }
       }
     } catch (err: any) {
       console.error('Erro ao carregar contraproposta:', err);
@@ -223,12 +242,27 @@ const QuotationResponse = () => {
           
           if (responseData && responseData.parts && Array.isArray(responseData.parts)) {
             console.log('Usando partes de requestData.response_data:', responseData.parts);
+            // Filtra apenas as peças disponíveis
+            const responseParts = (responseData.parts as any[])
+              .filter((part: any) => part.available !== false) // Inclui apenas peças disponíveis
+              .map((part: any) => ({
+                description: part.description,
+                quantity: part.quantity,
+                unit_price: part.unit_price,
+                total_price: part.quantity * part.unit_price,
+                condition: part.condition,
+                available: part.available !== false,
+                delivery_time: part.delivery_time,
+                notes: part.notes,
+                negotiated: part.negotiated || false
+              }));
+
             const formattedResponse = {
               quotation_id: responseData.quotation_id || quotationId,
               supplier_name: responseData.supplier_name || '',
               supplier_phone: responseData.supplier_phone || '',
-              parts: responseData.parts,
-              total_price: responseData.total_price || 0,
+              parts: responseParts,
+              total_price: responseParts.reduce((sum, part) => sum + part.total_price, 0),
               delivery_time: responseData.delivery_time || '',
               notes: responseData.notes || ''
             };
@@ -296,7 +330,22 @@ const QuotationResponse = () => {
           
           if (responseData && responseData.parts && Array.isArray(responseData.parts)) {
             console.log('Usando partes de requestData.response_data:', responseData.parts);
-            finalQuotationData.parts = responseData.parts;
+            // Filtra apenas as peças disponíveis
+            const responseParts = (responseData.parts as any[])
+              .filter((part: any) => part.available !== false) // Inclui apenas peças disponíveis
+              .map((part: any) => ({
+                description: part.description,
+                quantity: part.quantity,
+                unit_price: part.unit_price,
+                total_price: part.quantity * part.unit_price,
+                condition: part.condition,
+                available: part.available !== false,
+                delivery_time: part.delivery_time,
+                notes: part.notes,
+                negotiated: part.negotiated || false
+              }));
+
+            finalQuotationData.parts = responseParts;
           } else {
             console.error('responseData não contém um array parts válido:', responseData);
           }
@@ -310,7 +359,22 @@ const QuotationResponse = () => {
         // Verifica se quotationData já tem a propriedade parts
         if (quotationData.parts && Array.isArray(quotationData.parts)) {
           console.log('Usando parts já carregados de quotationData:', quotationData.parts);
-          finalQuotationData.parts = quotationData.parts;
+          // Filtra apenas as peças disponíveis (se houver informação de disponibilidade)
+          const quotationParts = quotationData.parts
+            .filter((part: any) => part.available !== false) // Inclui apenas peças disponíveis
+            .map((part: any) => ({
+              description: part.description,
+              quantity: part.quantity,
+              unit_price: 0,
+              total_price: 0,
+              condition: '',
+              available: true,
+              delivery_time: '',
+              notes: part.notes || '',
+              negotiated: false
+            }));
+
+          finalQuotationData.parts = quotationParts;
         }
       }
       
@@ -341,15 +405,18 @@ const QuotationResponse = () => {
                 quotation_id: responseData.quotation_id || quotationId,
                 supplier_name: responseData.supplier_name || '',
                 supplier_phone: responseData.supplier_phone || '',
-                parts: responseData.parts.map((part: any) => ({
-                  description: part.description,
-                  quantity: part.quantity,
-                  unit_price: part.unit_price || 0,
-                  total_price: part.total_price || 0,
-                  available: part.available !== undefined ? part.available : true,
-                  condition: part.condition || 'new',
-                  notes: part.notes || ''
-                })),
+                parts: (responseData.parts as any[])
+                  .filter((part: any) => part.available !== false) // Inclui apenas peças disponíveis
+                  .map((part: any) => ({
+                    description: part.description,
+                    quantity: part.quantity,
+                    unit_price: part.unit_price || 0,
+                    total_price: part.total_price || 0,
+                    available: part.available !== undefined ? part.available : true,
+                    condition: part.condition || 'new',
+                    notes: part.notes || '',
+                    negotiated: part.negotiated || false
+                  })),
                 total_price: responseData.total_price || 0,
                 delivery_time: responseData.delivery_time || '',
                 notes: responseData.notes || ''
@@ -372,7 +439,8 @@ const QuotationResponse = () => {
             total_price: 0,
             available: true,
             condition: 'new' as 'new' | 'used',
-            notes: part.notes || ''
+            notes: part.notes || '',
+            negotiated: false
           }));
           
           console.log('Inicializando response com os itens originais da cotação:', initialParts);
@@ -521,7 +589,8 @@ const QuotationResponse = () => {
           available: part.available,
           condition: part.condition,
           accepted: part.accepted !== undefined ? part.accepted : true,
-          notes: part.notes
+          notes: part.notes,
+          negotiated: part.negotiated || false
         })),
         total_price: response.total_price,
         delivery_time: response.delivery_time,
@@ -649,6 +718,11 @@ const QuotationResponse = () => {
                       <tr key={index} className={part.available ? 'bg-green-50' : 'bg-red-50'}>
                         <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                           {part.description}
+                          {part.negotiated && (
+                            <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                              Negociado
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-center">
                           {part.quantity}
@@ -803,6 +877,11 @@ const QuotationResponse = () => {
                       <tr key={index} className={!part.available ? 'bg-gray-100' : part.accepted ? 'bg-green-50' : 'bg-red-50'}>
                         <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                           {part.description}
+                          {part.negotiated && (
+                            <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                              Negociado
+                            </span>
+                          )}
                           {!part.available && <span className="ml-2 text-red-500">(Não disponível)</span>}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-center">
@@ -962,6 +1041,11 @@ const QuotationResponse = () => {
                       <tr key={index} className={!part.available ? 'bg-gray-100' : part.accepted ? 'bg-green-50' : 'bg-red-50'}>
                         <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                           {part.description}
+                          {part.negotiated && (
+                            <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                              Negociado
+                            </span>
+                          )}
                           {!part.available && <span className="ml-2 text-red-500">(Não disponível)</span>}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-center">
@@ -1021,7 +1105,7 @@ const QuotationResponse = () => {
                   </tbody>
                   <tfoot className="bg-gray-50">
                     <tr>
-                      <td colSpan={5} className="px-3 py-2 text-sm font-medium text-gray-900 text-right">
+                      <td colSpan={4} className="px-3 py-2 text-sm font-medium text-gray-900 text-right">
                         Valor Total Original:
                       </td>
                       <td className="px-3 py-2 text-sm font-medium text-gray-900 text-right">
@@ -1030,7 +1114,7 @@ const QuotationResponse = () => {
                       </td>
                     </tr>
                     <tr>
-                      <td colSpan={5} className="px-3 py-2 text-sm font-bold text-gray-900 text-right">
+                      <td colSpan={4} className="px-3 py-2 text-sm font-bold text-gray-900 text-right">
                         Valor Total Contraproposta:
                       </td>
                       <td className="px-3 py-2 text-sm font-bold text-gray-900 text-right">
@@ -1198,6 +1282,11 @@ const QuotationResponse = () => {
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                           {part.description}
+                          {part.negotiated && (
+                            <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                              Negociado
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-center">
                           {part.quantity}

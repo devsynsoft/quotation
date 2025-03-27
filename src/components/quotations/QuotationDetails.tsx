@@ -6,6 +6,7 @@ import { sendBulkWhatsAppMessages } from '../../services/evolutionApi';
 import { customToast } from '../../lib/toast';
 import { useAuth } from '../../hooks/useAuth';
 import { Link } from 'react-router-dom';
+import CounterOfferModal from './CounterOfferModal';
 
 interface Vehicle {
   brand: string;
@@ -128,6 +129,8 @@ export function QuotationDetails() {
   const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null);
   const [suppliersListCollapsed, setSuppliersListCollapsed] = useState(true);
   const [showImages, setShowImages] = useState(false);
+  const [counterOfferModalOpen, setCounterOfferModalOpen] = useState(false);
+  const [selectedRequestForCounterOffer, setSelectedRequestForCounterOffer] = useState<QuotationRequest | null>(null);
 
   useEffect(() => {
     // Carrega o usuário atual
@@ -964,7 +967,8 @@ ${message}`;
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                navigate(`/quotation-responses/${quotation.id}?open_counter_offer=${request.id}`);
+                                setSelectedRequestForCounterOffer(request);
+                                setCounterOfferModalOpen(true);
                               }}
                               className="text-green-600 hover:text-green-800 focus:outline-none"
                               title="Fazer contraproposta"
@@ -1402,6 +1406,14 @@ ${message}`;
           )}
         </div>
       </div>
+
+      {counterOfferModalOpen && (
+        <CounterOfferModal
+          request={selectedRequestForCounterOffer}
+          onClose={() => setCounterOfferModalOpen(false)}
+          quotationId={quotation?.id}
+        />
+      )}
     </div>
   );
 }

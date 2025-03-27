@@ -22,6 +22,7 @@ import VehicleQuotationForm from './components/VehicleQuotationForm';
 import { WhatsAppSettings } from './components/settings/WhatsAppSettings';
 import { Toaster } from 'react-hot-toast';
 import QuotationResponse from './pages/QuotationResponse';
+import CounterOfferResponse from './pages/CounterOfferResponse';
 import { SettingsPage } from './components/settings/SettingsPage';
 import { QuotationComparison } from './pages/QuotationComparison';
 import { PurchaseOrderDetails } from './pages/PurchaseOrderDetails';
@@ -70,6 +71,7 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/quotation-response/:id/:requestId" element={<QuotationResponse />} />
+          <Route path="/counter-offer-response/:id/:requestId" element={<CounterOfferResponse />} />
           <Route path="*" element={<ProtectedRoutes />} />
         </Routes>
       </AuthProvider>

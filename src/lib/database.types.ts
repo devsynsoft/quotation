@@ -258,6 +258,64 @@ export interface Database {
           }
         ]
       }
+      counter_offers: {
+        Row: {
+          id: string
+          quotation_id: string
+          request_id: string
+          supplier_id: string
+          counter_offer_data: Json
+          status: string
+          response_data: Json | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          quotation_id: string
+          request_id: string
+          supplier_id: string
+          counter_offer_data: Json
+          status: string
+          response_data?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          quotation_id?: string
+          request_id?: string
+          supplier_id?: string
+          counter_offer_data?: Json
+          status?: string
+          response_data?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "counter_offers_quotation_id_fkey"
+            columns: ["quotation_id"]
+            isOneToOne: false
+            referencedRelation: "quotations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "counter_offers_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: false
+            referencedRelation: "quotation_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "counter_offers_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       suppliers: {
         Row: {
           id: string

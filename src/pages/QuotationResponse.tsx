@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { customToast } from '../lib/toast';
-import { Loader2, Send, Printer } from 'lucide-react';
+import { Loader2, Send, Printer, Check, X } from 'lucide-react';
 
 interface Part {
   description: string;
@@ -24,13 +24,7 @@ interface PartResponse {
 interface Quotation {
   id: string;
   vehicle_id?: string;
-  vehicle?: {
-    brand: string;
-    model: string;
-    year: string;
-    chassis?: string;
-    images?: string[];
-  };
+  vehicle?: any;
   parts: Part[];
   status: 'pending' | 'responded';
 }
@@ -52,12 +46,46 @@ interface QuotationRequest {
   status: string;
   created_at: string;
   updated_at: string;
-  response_data?: QuotationResponse; 
+  response_data?: any;
   responded_at?: string;
+}
+
+interface CounterOffer {
+  id: string;
+  quotation_id: string;
+  request_id: string;
+  supplier_id: string;
+  counter_offer_data: {
+    supplier_name: string;
+    supplier_phone: string;
+    parts: {
+      description: string;
+      quantity: number;
+      original_price: number;
+      original_total: number;
+      counter_price: number;
+      counter_total: number;
+      discount_percentage: number;
+      available: boolean;
+      condition?: 'new' | 'used';
+      notes?: string;
+      accepted?: boolean;
+    }[];
+    total_price: number;
+    delivery_time?: string;
+    notes?: string;
+  };
+  status: string;
+  response_data?: any;
+  created_at: string;
+  updated_at: string;
 }
 
 const QuotationResponse = () => {
   const { id, requestId } = useParams<{ id: string; requestId: string }>();
+  const [searchParams] = useSearchParams();
+  const counterOfferId = searchParams.get('counter_offer_id');
+  
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -72,58 +100,92 @@ const QuotationResponse = () => {
     delivery_time: '',
     notes: ''
   });
+  const [counterOffer, setCounterOffer] = useState<CounterOffer | null>(null);
+  const [isCounterOffer, setIsCounterOffer] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
 
   useEffect(() => {
     if (id && requestId) {
-      loadQuotation(id, requestId);
-    }
-  }, [id, requestId]);
-
-  useEffect(() => {
-    if (quotation) {
-      // Se não houver resposta já carregada dos dados salvos
-      if (!response.parts.length) {
-        const initialParts = quotation.parts.map(part => ({
-          description: part.description,
-          quantity: part.quantity,
-          unit_price: 0,
-          total_price: 0,
-          notes: part.notes || '',
-          available: true,
-          condition: 'new' as 'new' | 'used'
-        }));
-
-        setResponse({
-          quotation_id: quotation.id,
-          supplier_name: '',
-          supplier_phone: '',
-          parts: initialParts,
-          total_price: 0,
-          delivery_time: '',
-          notes: ''
-        });
-      }
+      console.log('Iniciando carregamento da cotação com ID:', id, 'e requestId:', requestId);
       
-      // Log para debug
-      console.log('Inicializando response com os dados da cotação:', response);
+      if (counterOfferId) {
+        console.log('Carregando contraproposta com ID:', counterOfferId);
+        setIsCounterOffer(true);
+        loadCounterOffer(counterOfferId);
+      } else {
+        loadQuotation(id, requestId);
+      }
     }
-  }, [quotation]);
+  }, [id, requestId, counterOfferId]);
 
   useEffect(() => {
-    console.log('Estado atual - response:', response);
-    console.log('Estado atual - quotation:', quotation);
-    console.log('Estado atual - request:', request);
-    console.log('Estado atual - submitted:', submitted);
-  }, [response, quotation, request, submitted]);
+    console.log('Estado response atualizado:', response);
+    console.log('Número de itens em response.parts:', response.parts ? response.parts.length : 0);
+  }, [response]);
 
-  const loadQuotation = async (quotationId: string, quotationRequestId: string) => {
+  const loadCounterOffer = async (counterOfferId: string) => {
     setLoading(true);
     try {
+      // Carrega os dados da contraproposta
+      const { data: counterOfferData, error: counterOfferError } = await supabase
+        .from('counter_offers')
+        .select('*')
+        .eq('id', counterOfferId)
+        .single();
+
+      if (counterOfferError) {
+        console.error('Erro ao buscar contraproposta:', counterOfferError);
+        throw counterOfferError;
+      }
+
+      console.log('Dados da contraproposta carregados:', counterOfferData);
+      setCounterOffer(counterOfferData);
+
+      // Carrega os dados da cotação original
+      await loadQuotation(id!, requestId!, true);
+
+      // Inicializa a resposta com os dados da contraproposta
+      const counterOfferParts = counterOfferData.counter_offer_data.parts.map(part => ({
+        ...part,
+        accepted: part.accepted !== undefined ? part.accepted : true
+      }));
+
+      setResponse({
+        quotation_id: id || '',
+        supplier_name: counterOfferData.counter_offer_data.supplier_name,
+        supplier_phone: counterOfferData.counter_offer_data.supplier_phone,
+        parts: counterOfferParts,
+        total_price: calculateAcceptedTotal(counterOfferParts),
+        delivery_time: counterOfferData.counter_offer_data.delivery_time || '',
+        notes: counterOfferData.counter_offer_data.notes || ''
+      });
+
+      if (counterOfferData.status === 'responded') {
+        setSubmitted(true);
+      }
+    } catch (err: any) {
+      console.error('Erro ao carregar contraproposta:', err);
+      customToast.error(err.message || 'Erro ao carregar contraproposta');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const calculateAcceptedTotal = (parts: any[]) => {
+    return parts.reduce((sum, part) => 
+      sum + (part.available && (part.accepted !== false) ? (part.counter_total || 0) : 0), 0);
+  };
+
+  // Modificação da função loadQuotation para suportar contrapropostas
+  const loadQuotation = async (quotationId: string, quotationRequestId: string, isForCounterOffer = false) => {
+    setLoading(true);
+    try {
+      console.log('Iniciando carregamento da cotação:', quotationId, 'request:', quotationRequestId);
+      
       // 1. Primeiro carrega os dados da solicitação de cotação
       const { data: requestData, error: requestError } = await supabase
         .from('quotation_requests')
-        .select('*, response_data')
+        .select('*')
         .eq('id', quotationRequestId)
         .single();
 
@@ -133,128 +195,206 @@ const QuotationResponse = () => {
       }
 
       console.log('Dados da solicitação de cotação carregados:', requestData);
+      setRequest(requestData);
 
       // 2. Verifica se a cotação já foi respondida
       if (requestData.status === 'responded') {
-        setRequest(requestData);
+        console.log('Cotação já respondida, carregando dados da resposta');
         setSubmitted(true);
         
+        // Verifica se há dados de resposta no objeto requestData
         if (requestData.response_data) {
-          console.log('Dados da resposta carregados:', requestData.response_data);
-          const responseData = requestData.response_data;
-        
-          // Garante que todos os campos necessários estejam presentes
-          const formattedResponse = {
-            quotation_id: responseData.quotation_id || quotationId,
-            supplier_name: responseData.supplier_name || '',
-            supplier_phone: responseData.supplier_phone || '',
-            parts: responseData.parts || [],
-            total_price: responseData.total_price || 0,
-            delivery_time: responseData.delivery_time || '',
-            notes: responseData.notes || ''
-          };
-        
-          console.log('Dados da resposta formatados:', formattedResponse);
-          setResponse(formattedResponse);
+          console.log('Tipo de requestData.response_data:', typeof requestData.response_data);
+          
+          // Tenta converter response_data para objeto se for string
+          let responseData = requestData.response_data;
+          
+          if (typeof responseData === 'string') {
+            console.log('Convertendo response_data de string para objeto');
+            try {
+              responseData = JSON.parse(responseData);
+            } catch (parseError) {
+              console.error('Erro ao fazer parse do JSON:', parseError);
+              console.log('String original:', responseData);
+            }
+          }
+            
+          console.log('Estrutura de responseData após processamento:', responseData);
+          
+          if (responseData && responseData.parts && Array.isArray(responseData.parts)) {
+            console.log('Usando partes de requestData.response_data:', responseData.parts);
+            const formattedResponse = {
+              quotation_id: responseData.quotation_id || quotationId,
+              supplier_name: responseData.supplier_name || '',
+              supplier_phone: responseData.supplier_phone || '',
+              parts: responseData.parts,
+              total_price: responseData.total_price || 0,
+              delivery_time: responseData.delivery_time || '',
+              notes: responseData.notes || ''
+            };
+            
+            console.log('Dados da resposta formatados:', formattedResponse);
+            setResponse(formattedResponse);
+          } else {
+            console.error('responseData não contém um array parts válido:', responseData);
+          }
         } else {
-          console.error('Resposta marcada como respondida, mas não há dados de resposta');
-          customToast.error('Não foi possível carregar os dados da resposta');
+          console.log('Cotação marcada como respondida, mas não há dados de resposta');
         }
-      } else {
-        setRequest(requestData);
       }
-
+      
       // 3. Carrega os dados básicos da cotação
       const { data: quotationData, error: quotationError } = await supabase
         .from('quotations')
-        .select('*')
+        .select(`
+          *,
+          vehicles (
+            id, brand, model, year, created_at
+          )
+        `)
         .eq('id', quotationId)
         .single();
-
+      
       if (quotationError) {
-        console.error('Erro ao buscar cotação:', quotationError);
-        throw quotationError;
+        console.error('Erro ao carregar dados da cotação:', quotationError);
+        setLoading(false);
+        return;
       }
       
       console.log('Dados da cotação carregados:', quotationData);
       
       // 4. Cria uma cópia dos dados da cotação para adicionar informações adicionais
-      let finalQuotationData = { ...quotationData };
+      let finalQuotationData = { 
+        ...quotationData,
+        vehicle: quotationData.vehicles,
+        parts: [],
+        status: quotationData.status || 'pending'
+      };
       
-      // 5. Busca os dados do veículo separadamente
-      if (quotationData && quotationData.vehicle_id) {
+      // 5. Busca os itens da cotação
+      console.log('Buscando itens da cotação para ID:', quotationId);
+      
+      // Se a cotação já foi respondida, usa os dados de response_data
+      if (requestData.status === 'responded' && requestData.response_data) {
         try {
-          const { data: vehicleData, error: vehicleError } = await supabase
-            .from('vehicles')
-            .select('*')
-            .eq('id', quotationData.vehicle_id)
-            .single();
+          console.log('Tipo de requestData.response_data:', typeof requestData.response_data);
           
-          if (vehicleError) {
-            console.error('Erro ao buscar veículo:', vehicleError);
-          } else if (vehicleData) {
-            console.log('Dados do veículo carregados:', vehicleData);
-            finalQuotationData.vehicle = vehicleData;
+          // Tenta converter response_data para objeto se for string
+          let responseData = requestData.response_data;
+          
+          if (typeof responseData === 'string') {
+            console.log('Convertendo response_data de string para objeto');
+            try {
+              responseData = JSON.parse(responseData);
+            } catch (parseError) {
+              console.error('Erro ao fazer parse do JSON:', parseError);
+              console.log('String original:', responseData);
+            }
           }
-        } catch (vehicleErr) {
-          console.error('Exceção ao buscar veículo:', vehicleErr);
-        }
-      }
-      
-      // 6. Busca os itens da cotação
-      try {
-        console.log('Tentando buscar itens da cotação com ID:', quotationId);
-        
-        // Tenta primeiro na tabela quotation_items
-        const { data: quotationItemsData, error: quotationItemsError } = await supabase
-          .from('quotation_items')
-          .select('*')
-          .eq('quotation_id', quotationId);
-        
-        if (quotationItemsError) {
-          console.error('Erro ao buscar itens da cotação em quotation_items:', quotationItemsError);
-          
-          // Se falhar, tenta na tabela quotation_parts
-          const { data: quotationPartsData, error: quotationPartsError } = await supabase
-            .from('quotation_parts')
-            .select('*')
-            .eq('quotation_id', quotationId);
             
-          if (quotationPartsError) {
-            console.error('Erro ao buscar itens da cotação em quotation_parts:', quotationPartsError);
-          } else if (quotationPartsData && quotationPartsData.length > 0) {
-            console.log('Itens da cotação carregados de quotation_parts:', quotationPartsData);
-            finalQuotationData.parts = quotationPartsData;
+          console.log('Estrutura de responseData após processamento:', responseData);
+          
+          if (responseData && responseData.parts && Array.isArray(responseData.parts)) {
+            console.log('Usando partes de requestData.response_data:', responseData.parts);
+            finalQuotationData.parts = responseData.parts;
           } else {
-            console.log('Nenhum item encontrado em quotation_parts');
+            console.error('responseData não contém um array parts válido:', responseData);
           }
-        } else if (quotationItemsData && quotationItemsData.length > 0) {
-          console.log('Itens da cotação carregados de quotation_items:', quotationItemsData);
-          finalQuotationData.parts = quotationItemsData;
-        } else {
-          console.log('Nenhum item encontrado em quotation_items');
+        } catch (error) {
+          console.error('Erro ao processar response_data:', error);
         }
+      } else {
+        // Se a cotação não foi respondida, busca os itens da coluna parts da tabela quotations
+        console.log('Cotação não respondida, buscando parts da tabela quotations');
         
-        // 7. Se não encontrou peças nas tabelas, mas tem nos dados da resposta, usa esses
-        if (requestData.response_data && requestData.response_data.parts) {
-          console.log('Peças encontradas nos dados da resposta:', requestData.response_data.parts);
-          if (!finalQuotationData.parts || finalQuotationData.parts.length === 0) {
-            finalQuotationData.parts = requestData.response_data.parts;
-          }
+        // Verifica se quotationData já tem a propriedade parts
+        if (quotationData.parts && Array.isArray(quotationData.parts)) {
+          console.log('Usando parts já carregados de quotationData:', quotationData.parts);
+          finalQuotationData.parts = quotationData.parts;
         }
-      } catch (itemsErr) {
-        console.error('Exceção ao buscar itens da cotação:', itemsErr);
       }
       
-      // 8. Atualiza o estado com os dados finais
-      console.log('Dados finais da cotação:', finalQuotationData);
+      // 6. Se não encontrou itens, exibe um erro
+      if (!finalQuotationData.parts || finalQuotationData.parts.length === 0) {
+        console.error('Nenhum item encontrado para a cotação');
+      }
+      
+      // 7. Inicializa o estado response com os itens da cotação se ainda não foi inicializado e não for para contraproposta
+      if (!isForCounterOffer) {
+        // Se a cotação já foi respondida e temos os dados de resposta
+        if (requestData.status === 'responded' && requestData.response_data) {
+          try {
+            console.log('Usando dados de resposta para inicializar o estado');
+            
+            // Tenta converter response_data para objeto se for string
+            let responseData = requestData.response_data;
+            
+            if (typeof responseData === 'string') {
+              responseData = JSON.parse(responseData);
+            }
+            
+            if (responseData && responseData.parts && Array.isArray(responseData.parts)) {
+              console.log('Usando partes de requestData.response_data para o estado:', responseData.parts);
+              
+              // Garante que todos os campos necessários estejam presentes
+              const formattedResponse = {
+                quotation_id: responseData.quotation_id || quotationId,
+                supplier_name: responseData.supplier_name || '',
+                supplier_phone: responseData.supplier_phone || '',
+                parts: responseData.parts.map((part: any) => ({
+                  description: part.description,
+                  quantity: part.quantity,
+                  unit_price: part.unit_price || 0,
+                  total_price: part.total_price || 0,
+                  available: part.available !== undefined ? part.available : true,
+                  condition: part.condition || 'new',
+                  notes: part.notes || ''
+                })),
+                total_price: responseData.total_price || 0,
+                delivery_time: responseData.delivery_time || '',
+                notes: responseData.notes || ''
+              };
+              
+              console.log('Estado formatado com dados de resposta:', formattedResponse);
+              setResponse(formattedResponse);
+              setSubmitted(true);
+            }
+          } catch (error) {
+            console.error('Erro ao processar response_data para o estado:', error);
+          }
+        } 
+        // Se a cotação não foi respondida ou não temos dados de resposta, inicializa com os itens originais
+        else if ((!response.parts || response.parts.length === 0) && finalQuotationData.parts.length > 0) {
+          const initialParts = finalQuotationData.parts.map(part => ({
+            description: part.description,
+            quantity: part.quantity,
+            unit_price: 0,
+            total_price: 0,
+            available: true,
+            condition: 'new' as 'new' | 'used',
+            notes: part.notes || ''
+          }));
+          
+          console.log('Inicializando response com os itens originais da cotação:', initialParts);
+          
+          setResponse(prev => ({
+            ...prev,
+            quotation_id: quotationId,
+            parts: initialParts,
+            total_price: 0
+          }));
+        }
+      }
+      
+      // 8. Atualiza o estado da cotação
       setQuotation(finalQuotationData);
-      setDataLoaded(true);
-    } catch (err: any) {
-      console.error('Erro ao carregar cotação:', err);
-      customToast.error(err.message || 'Erro ao carregar cotação');
+      
+    } catch (error) {
+      console.error('Erro ao carregar cotação:', error);
+      customToast.error('Erro ao carregar cotação. Por favor, tente novamente.');
     } finally {
       setLoading(false);
+      setDataLoaded(true);
     }
   };
 
@@ -294,6 +434,27 @@ const QuotationResponse = () => {
         ...prev,
         parts: newParts,
         total_price: totalPrice,
+      };
+    });
+  };
+
+  const handlePartAcceptance = (index: number, accepted: boolean) => {
+    if (!counterOffer) return;
+
+    setResponse(prev => {
+      const newParts = [...prev.parts];
+      newParts[index] = {
+        ...newParts[index],
+        accepted
+      };
+
+      // Recalcula o total apenas com as peças aceitas
+      const totalPrice = calculateAcceptedTotal(newParts);
+
+      return {
+        ...prev,
+        parts: newParts,
+        total_price: totalPrice
       };
     });
   };
@@ -341,6 +502,72 @@ const QuotationResponse = () => {
     }
   };
 
+  const handleSubmitCounterOfferResponse = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!request || !counterOffer) return;
+
+    try {
+      setSubmitting(true);
+
+      // Prepara os dados da resposta
+      const responseData = {
+        parts: response.parts.map(part => ({
+          description: part.description,
+          quantity: part.quantity,
+          original_price: part.original_price,
+          counter_price: part.counter_price,
+          counter_total: part.counter_total,
+          discount_percentage: part.discount_percentage,
+          available: part.available,
+          condition: part.condition,
+          accepted: part.accepted !== undefined ? part.accepted : true,
+          notes: part.notes
+        })),
+        total_price: response.total_price,
+        delivery_time: response.delivery_time,
+        notes: response.notes,
+        supplier_name: response.supplier_name,
+        supplier_phone: response.supplier_phone
+      };
+
+      // Atualiza o status da contraproposta
+      const allAccepted = response.parts.every(part => part.accepted !== false);
+      const status = allAccepted ? 'accepted' : 'partially_accepted';
+
+      const { error: updateError } = await supabase
+        .from('counter_offers')
+        .update({
+          status: status,
+          response_data: responseData,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', counterOffer.id);
+
+      if (updateError) throw updateError;
+
+      // Atualiza a cotação original com os novos valores
+      const { error: quotationUpdateError } = await supabase
+        .from('quotation_requests')
+        .update({
+          response_data: {
+            ...response,
+            renegotiated: true
+          }
+        })
+        .eq('id', requestId);
+
+      if (quotationUpdateError) throw quotationUpdateError;
+
+      customToast.success('Resposta à contraproposta enviada com sucesso!');
+      setSubmitted(true);
+    } catch (err: any) {
+      console.error('Erro ao enviar resposta à contraproposta:', err);
+      customToast.error(err.message || 'Erro ao enviar resposta');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -352,18 +579,6 @@ const QuotationResponse = () => {
   if (submitted) {
     return (
       <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
-        <style type="text/css" media="print">
-          {`
-            @page { size: auto; margin: 10mm; }
-            @media print {
-              body { background-color: #fff; }
-              .no-print { display: none !important; }
-              .print-only { display: block !important; }
-              .print-container { box-shadow: none !important; padding: 0 !important; }
-              .print-header { text-align: center; margin-bottom: 20px; }
-            }
-          `}
-        </style>
         <div className="max-w-4xl mx-auto">
           <div className="bg-white shadow rounded-lg p-6 print-container">
             <div className="mb-6 text-center print-header">
@@ -376,7 +591,7 @@ const QuotationResponse = () => {
                 Cotação Enviada com Sucesso!
               </h2>
               <p className="text-gray-600 mb-6 no-print">
-                Esta cotação já foi respondida. Abaixo estão os detalhes da sua resposta.
+                Esta cotação já foi enviada e não pode ser alterada.
               </p>
               <p className="text-gray-900 font-bold print-only" style={{ display: 'none' }}>
                 Cotação de Peças - {new Date().toLocaleDateString()}
@@ -525,6 +740,364 @@ const QuotationResponse = () => {
     );
   }
 
+  if (isCounterOffer && counterOffer) {
+    if (loading) {
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
+        </div>
+      );
+    }
+
+    if (submitted) {
+      return (
+        <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
+          <div className="max-w-4xl mx-auto">
+            <div className="bg-white shadow rounded-lg p-6 print-container">
+              <div className="mb-6 text-center print-header">
+                <div className="mb-4 no-print">
+                  <svg className="mx-auto h-12 w-12 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                  Resposta à Contraproposta Enviada!
+                </h2>
+                <p className="text-gray-600 mb-6 no-print">
+                  Sua resposta à contraproposta foi enviada com sucesso.
+                </p>
+              </div>
+
+              <div className="mb-6">
+                <h2 className="text-lg font-medium mb-2">Detalhes do Veículo</h2>
+                <p>
+                  {quotation?.vehicle?.brand || 'N/A'} {quotation?.vehicle?.model || ''} {quotation?.vehicle?.year || ''}
+                  {quotation?.vehicle?.chassis && ` - Chassi: ${quotation.vehicle.chassis}`}
+                </p>
+              </div>
+
+              <div className="overflow-x-auto mb-6">
+                <h2 className="text-lg font-medium mb-4">Itens da Contraproposta</h2>
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Peça
+                      </th>
+                      <th scope="col" className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Qtde
+                      </th>
+                      <th scope="col" className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Preço Original
+                      </th>
+                      <th scope="col" className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Contraproposta
+                      </th>
+                      <th scope="col" className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Status
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {response.parts.map((part, index) => (
+                      <tr key={index} className={!part.available ? 'bg-gray-100' : part.accepted ? 'bg-green-50' : 'bg-red-50'}>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                          {part.description}
+                          {!part.available && <span className="ml-2 text-red-500">(Não disponível)</span>}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-center">
+                          {part.quantity}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right">
+                          {part.available ? `R$ ${part.original_price.toFixed(2)}` : '-'}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right">
+                          {part.available ? `R$ ${part.counter_price.toFixed(2)}` : '-'}
+                          {part.available && part.condition && (
+                            <div className="text-xs mt-1">
+                              <span className={`px-2 py-1 rounded-md text-xs font-medium ${
+                                part.condition === 'new'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}>
+                                {part.condition === 'new' ? 'Nova' : 'Usada'}
+                              </span>
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
+                          {part.available ? (
+                            part.accepted ? (
+                              <span className="px-2 py-1 rounded-md text-xs font-medium bg-green-100 text-green-800">
+                                Aceito
+                              </span>
+                            ) : (
+                              <span className="px-2 py-1 rounded-md text-xs font-medium bg-red-100 text-red-800">
+                                Recusado
+                              </span>
+                            )
+                          ) : (
+                            <span className="px-2 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-800">
+                              N/A
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-gray-50">
+                    <tr>
+                      <td colSpan={4} className="px-3 py-2 text-sm font-medium text-gray-900 text-right">
+                        Valor Total Original:
+                      </td>
+                      <td className="px-3 py-2 text-sm font-medium text-gray-900 text-right">
+                        R$ {counterOffer.counter_offer_data.parts.reduce((sum, part) => 
+                          sum + (part.available ? part.original_total : 0), 0).toFixed(2)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td colSpan={4} className="px-3 py-2 text-sm font-bold text-gray-900 text-right">
+                        Valor Total Contraproposta:
+                      </td>
+                      <td className="px-3 py-2 text-sm font-bold text-gray-900 text-right">
+                        R$ {response.total_price.toFixed(2)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              <div className="mt-6 text-center text-gray-500 text-sm no-print">
+                <p>Esta resposta já foi enviada e não pode ser alterada.</p>
+                <p className="mt-2">Aguarde o contato do solicitante para finalizar a negociação.</p>
+              </div>
+              <div className="mt-6 flex justify-center no-print">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                >
+                  <Printer className="w-4 h-4 mr-2" />
+                  Imprimir
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-4xl mx-auto">
+          <div className="bg-white shadow rounded-lg p-6">
+            <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
+              <div className="flex">
+                <div className="flex-shrink-0">
+                  <svg className="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div className="ml-3">
+                  <p className="text-sm text-yellow-700">
+                    <strong>CONTRAPROPOSTA:</strong> O cliente fez uma contraproposta para os itens abaixo. 
+                    Você pode aceitar ou recusar cada item individualmente.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <h1 className="text-2xl font-bold mb-6">Responder Contraproposta</h1>
+
+            <div className="mb-6">
+              <h2 className="text-lg font-medium mb-2">Detalhes do Veículo</h2>
+              <p>
+                {quotation?.vehicle?.brand || 'N/A'} {quotation?.vehicle?.model || ''} {quotation?.vehicle?.year || ''}
+                {quotation?.vehicle?.chassis && ` - Chassi: ${quotation.vehicle.chassis}`}
+              </p>
+            </div>
+
+            <form onSubmit={handleSubmitCounterOfferResponse} className="space-y-6">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-6 bg-blue-50 p-4 rounded-lg border-2 border-blue-200">
+                <div>
+                  <label className="block text-sm font-semibold text-blue-900 mb-2">
+                    Nome do Fornecedor
+                  </label>
+                  <p className="text-gray-900">{response.supplier_name}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-blue-900 mb-2">
+                    Telefone do Fornecedor
+                  </label>
+                  <p className="text-gray-900">{response.supplier_phone}</p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Peça
+                      </th>
+                      <th scope="col" className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Qtde
+                      </th>
+                      <th scope="col" className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Preço Original
+                      </th>
+                      <th scope="col" className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Contraproposta
+                      </th>
+                      <th scope="col" className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Desconto
+                      </th>
+                      <th scope="col" className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Ação
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {response.parts.map((part, index) => (
+                      <tr key={index} className={!part.available ? 'bg-gray-100' : part.accepted ? 'bg-green-50' : 'bg-red-50'}>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                          {part.description}
+                          {!part.available && <span className="ml-2 text-red-500">(Não disponível)</span>}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-center">
+                          {part.quantity}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right">
+                          {part.available ? `R$ ${part.original_price.toFixed(2)}` : '-'}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right">
+                          {part.available ? (
+                            <div className="flex items-center gap-2">
+                              <div>
+                                R$ {part.counter_price.toFixed(2)} /un
+                                <br />
+                                <span className="text-xs text-green-500">
+                                  -R$ {(part.original_price - part.counter_price).toFixed(2)} ({-part.discount_percentage}%)
+                                </span>
+                                <br />
+                                <span className={`text-xs px-2 py-1 rounded-md font-medium ${
+                                  part.condition === 'new'
+                                    ? 'bg-blue-100 text-blue-800'
+                                    : 'bg-amber-100 text-amber-800'
+                                }`}>
+                                  {part.condition === 'new' ? 'Nova' : 'Usada'}
+                                </span>
+                              </div>
+                            </div>
+                          ) : '-'}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-center">
+                          {part.available ? `${part.discount_percentage}%` : '-'}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
+                          {part.available && (
+                            <div className="flex justify-center space-x-2">
+                              <button
+                                type="button"
+                                onClick={() => handlePartAcceptance(index, true)}
+                                className={`p-1 rounded-full ${part.accepted ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}
+                                title="Aceitar"
+                              >
+                                <Check className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handlePartAcceptance(index, false)}
+                                className={`p-1 rounded-full ${part.accepted === false ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-400'}`}
+                                title="Recusar"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-gray-50">
+                    <tr>
+                      <td colSpan={5} className="px-3 py-2 text-sm font-medium text-gray-900 text-right">
+                        Valor Total Original:
+                      </td>
+                      <td className="px-3 py-2 text-sm font-medium text-gray-900 text-right">
+                        R$ {counterOffer.counter_offer_data.parts.reduce((sum, part) => 
+                          sum + (part.available ? part.original_total : 0), 0).toFixed(2)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td colSpan={5} className="px-3 py-2 text-sm font-bold text-gray-900 text-right">
+                        Valor Total Contraproposta:
+                      </td>
+                      <td className="px-3 py-2 text-sm font-bold text-gray-900 text-right">
+                        R$ {response.total_price.toFixed(2)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              <div>
+                <h2 className="text-lg font-medium mb-4">Informações Gerais</h2>
+                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Prazo de Entrega
+                    </label>
+                    <input
+                      type="text"
+                      value={response.delivery_time}
+                      onChange={e => setResponse(prev => ({ ...prev, delivery_time: e.target.value }))}
+                      className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-primary focus:ring focus:ring-primary focus:ring-opacity-50"
+                      placeholder="Ex: 5 dias úteis"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Observações Gerais
+                  </label>
+                  <textarea
+                    value={response.notes}
+                    onChange={e => setResponse(prev => ({ ...prev, notes: e.target.value }))}
+                    rows={3}
+                    className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-primary focus:ring focus:ring-primary focus:ring-opacity-50"
+                    placeholder="Adicione observações relevantes sobre a contraproposta..."
+                  />
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {submitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Enviando...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4 mr-2" />
+                      Enviar Resposta
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
@@ -549,7 +1122,7 @@ const QuotationResponse = () => {
                   type="text"
                   value={response.supplier_name}
                   onChange={e => setResponse(prev => ({ ...prev, supplier_name: e.target.value }))}
-                  className="mt-1 block w-full rounded-md border-2 border-blue-200 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  className="mt-1 block w-full rounded-md border-2 border-blue-200 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
                   required
                   placeholder="Digite seu nome completo"
                 />
@@ -562,7 +1135,7 @@ const QuotationResponse = () => {
                   type="tel"
                   value={response.supplier_phone}
                   onChange={e => setResponse(prev => ({ ...prev, supplier_phone: e.target.value }))}
-                  className="mt-1 block w-full rounded-md border-2 border-blue-200 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  className="mt-1 block w-full rounded-md border-2 border-blue-200 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
                   required
                   placeholder="(00) 00000-0000"
                 />
@@ -598,12 +1171,30 @@ const QuotationResponse = () => {
                     response.parts.map((part, index) => (
                       <tr key={index} className={part.available ? 'bg-green-50' : 'bg-red-50'}>
                         <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
-                          <input
-                            type="checkbox"
-                            checked={part.available}
-                            onChange={e => handlePartChange(index, 'available', e.target.checked)}
-                            className="rounded-md border-2 border-gray-300 shadow-sm focus:border-primary focus:ring focus:ring-primary focus:ring-opacity-50"
-                          />
+                          <div className="flex justify-center space-x-2">
+                            <button
+                              type="button"
+                              onClick={() => handlePartChange(index, 'available', true)}
+                              className={`px-3 py-1 rounded-md text-xs font-medium ${
+                                part.available
+                                  ? 'bg-green-100 text-green-800 border-2 border-green-300'
+                                  : 'bg-gray-100 text-gray-800 border border-gray-300'
+                              }`}
+                            >
+                              Sim
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handlePartChange(index, 'available', false)}
+                              className={`px-3 py-1 rounded-md text-xs font-medium ${
+                                !part.available
+                                  ? 'bg-red-100 text-red-800 border-2 border-red-300'
+                                  : 'bg-gray-100 text-gray-800 border border-gray-300'
+                              }`}
+                            >
+                              Não
+                            </button>
+                          </div>
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                           {part.description}
@@ -625,14 +1216,30 @@ const QuotationResponse = () => {
                           {part.available ? `R$ ${part.total_price.toFixed(2)}` : '-'}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right">
-                          <select
-                            value={part.condition}
-                            onChange={e => handlePartChange(index, 'condition', e.target.value as 'new' | 'used')}
-                            className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-primary focus:ring focus:ring-primary focus:ring-opacity-50"
-                          >
-                            <option value="new">Nova</option>
-                            <option value="used">Usada</option>
-                          </select>
+                          <div className="flex justify-end space-x-2">
+                            <button
+                              type="button"
+                              onClick={() => handlePartChange(index, 'condition', 'new')}
+                              className={`px-3 py-1 rounded-md text-xs font-medium ${
+                                part.condition === 'new'
+                                  ? 'bg-blue-100 text-blue-800 border-2 border-blue-300'
+                                  : 'bg-gray-100 text-gray-800 border border-gray-300'
+                              }`}
+                            >
+                              Nova
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handlePartChange(index, 'condition', 'used')}
+                              className={`px-3 py-1 rounded-md text-xs font-medium ${
+                                part.condition === 'used'
+                                  ? 'bg-yellow-100 text-yellow-800 border-2 border-yellow-300'
+                                  : 'bg-gray-100 text-gray-800 border border-gray-300'
+                              }`}
+                            >
+                              Usada
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -658,7 +1265,7 @@ const QuotationResponse = () => {
                     type="text"
                     value={response.delivery_time}
                     onChange={e => setResponse(prev => ({ ...prev, delivery_time: e.target.value }))}
-                    className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-primary focus:ring focus:ring-primary focus:ring-opacity-50 px-5 py-2"
+                    className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-primary focus:ring focus:ring-primary focus:ring-opacity-50"
                     placeholder="Ex: 5 dias úteis"
                   />
                 </div>
@@ -680,7 +1287,7 @@ const QuotationResponse = () => {
                   value={response.notes}
                   onChange={e => setResponse(prev => ({ ...prev, notes: e.target.value }))}
                   rows={3}
-                  className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-primary focus:ring focus:ring-primary focus:ring-opacity-50 px-5 py-2"
+                  className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-primary focus:ring focus:ring-primary focus:ring-opacity-50"
                   placeholder="Adicione observações relevantes sobre a cotação..."
                 />
               </div>

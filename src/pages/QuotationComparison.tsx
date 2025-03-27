@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { customToast } from '../lib/toast';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, MessageCircle } from 'lucide-react';
 
 interface Part {
   description: string;
@@ -14,6 +14,7 @@ interface Part {
   purchased?: boolean;
   purchase_date?: Date;
   purchase_price?: number;
+  condition?: string;
 }
 
 interface QuotationPart {
@@ -256,7 +257,12 @@ export function QuotationComparison() {
                   </th>
                   {sortedRequests.map(request => (
                     <th key={request.id} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      {request.response_data?.supplier_name || 'NÃO INFORMADO'}
+                      <a href={`https://wa.me/55${request.response_data?.supplier_phone}`} target="_blank" rel="noopener noreferrer">
+                        <div className="flex items-center gap-2">
+                          <MessageCircle className="w-4 h-4 text-green-500" />
+                          {(request.response_data?.supplier_name || 'NÃO INFORMADO').toUpperCase()}
+                        </div>
+                      </a>
                       <br />
                       <span className="text-xs font-normal normal-case">
                         {request.response_data?.parts.filter(p => p.available).length || 0} peças disponíveis
@@ -324,6 +330,14 @@ export function QuotationComparison() {
                                       {' '}
                                       ({priceDifference > 0 ? '+' : ''}
                                       {percentageDifference.toFixed(1)}%)
+                                    </span>
+                                    <br />
+                                    <span className={`text-xs px-2 py-1 rounded-md font-medium ${
+                                      part.condition === 'new' || !part.condition
+                                        ? 'bg-blue-100 text-blue-800'
+                                        : 'bg-amber-100 text-amber-800'
+                                    }`}>
+                                      {part.condition === 'used' ? 'Usada' : 'Nova'}
                                     </span>
                                   </div>
                                   {sortedRequests.every(r => {

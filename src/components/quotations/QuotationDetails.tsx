@@ -960,17 +960,18 @@ ${message}`;
                           </div>
                         )}
                         <div className="flex items-center mt-1">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              resendToSupplier(request);
-                            }}
-                            disabled={sendingMessages[request.supplier_id]}
-                            className="text-blue-600 hover:text-blue-800 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="Reenviar solicitação"
-                          >
-                            <RefreshCw className="w-4 h-4" />
-                          </button>
+                          {request.status === 'responded' && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/quotation-responses/${quotation.id}?open_counter_offer=${request.id}`);
+                              }}
+                              className="text-green-600 hover:text-green-800 focus:outline-none"
+                              title="Fazer contraproposta"
+                            >
+                              <RefreshCw className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>

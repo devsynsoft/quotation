@@ -476,7 +476,7 @@ export function SupplierList() {
               className="bg-white p-4 rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer"
               onClick={() => handleEdit(supplier)}
             >
-              <h3 className="font-semibold text-lg mb-2">{supplier.name}</h3>
+              <h3 className="font-semibold text-lg mb-2">{supplier.name.toUpperCase()}</h3>
               <p className="text-gray-600 text-sm mb-1">
                 {supplier.area_code} {supplier.phone}
               </p>

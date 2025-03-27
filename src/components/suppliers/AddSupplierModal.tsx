@@ -68,7 +68,7 @@ export function AddSupplierModal({ isOpen, onClose, onSuccess, initialData }: Ad
           complement: '',
           neighborhood: '',
           zip_code: '',
-          parts_type: 'new',
+          parts_type: 'all',
           specialization: 'all'
         });
       }

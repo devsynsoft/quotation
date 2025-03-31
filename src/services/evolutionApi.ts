@@ -198,6 +198,23 @@ export async function sendWhatsAppMessage({
         phone: fullPhone
       });
 
+      // Extrai os valores das variáveis da mensagem original para usar na legenda
+      const variables: { [key: string]: string } = {};
+      
+      // Extrai vehicle_brand, vehicle_model, vehicle_year, vehicle_chassis
+      const vehicleRegex = /{(vehicle_[^}]+)}([^{]+)/g;
+      let match;
+      while ((match = vehicleRegex.exec(message)) !== null) {
+        const [, key, value] = match;
+        variables[key] = value.trim();
+      }
+
+      // Processa a legenda substituindo as variáveis pelos valores reais
+      let caption = '*{vehicle_brand}*  *{vehicle_model}* ANO *{vehicle_year}* *{vehicle_chassis}*';
+      Object.entries(variables).forEach(([key, value]) => {
+        caption = caption.replace(new RegExp(`\\{${key}\\}`, 'g'), value);
+      });
+
       const mediaResponse = await fetch(`${baseUrl}/message/sendMedia/${config.instance_name}`, {
         method: 'POST',
         headers: {
@@ -208,7 +225,7 @@ export async function sendWhatsAppMessage({
           number: fullPhone,
           media: imageUrl,
           mediatype: 'image',
-          caption: 'Foto do veículo'
+          caption: caption
         })
       });
 

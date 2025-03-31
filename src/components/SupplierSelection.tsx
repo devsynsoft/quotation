@@ -13,6 +13,7 @@ interface Supplier {
   city: string;
   state: string;
   categories?: string[];
+  vehicle_type?: string;
 }
 
 interface SupplierSelectionProps {
@@ -96,13 +97,45 @@ Quantidade: ${part.quantity}`
   const loadSuppliers = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      // Construir a consulta com os filtros
+      let query = supabase
         .from('suppliers')
         .select('*')
         .order('name');
+      
+      // Aplicar filtros
+      if (filters.ddd) {
+        query = query.eq('area_code', filters.ddd);
+      }
+      if (filters.city) {
+        query = query.eq('city', filters.city);
+      }
+      if (filters.state) {
+        query = query.eq('state', filters.state);
+      }
+      if (filters.part_type && filters.part_type !== '') {
+        query = query.eq('parts_type', filters.part_type);
+      }
+      if (filters.specialization && filters.specialization !== '') {
+        query = query.eq('specialization', filters.specialization);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
-      setSuppliers(data || []);
+      
+      console.log('Fornecedores filtrados:', data);
+      
+      // Aplicar filtro de nome se existir
+      let filteredData = data || [];
+      if (filters.name && filters.name.trim() !== '') {
+        const searchTerm = filters.name.toLowerCase();
+        filteredData = filteredData.filter(supplier => 
+          supplier.name?.toLowerCase().includes(searchTerm)
+        );
+      }
+      
+      setSuppliers(filteredData);
     } catch (err) {
       console.error('Erro ao carregar fornecedores:', err);
       customToast.error('Erro ao carregar fornecedores');
@@ -110,6 +143,11 @@ Quantidade: ${part.quantity}`
       setLoading(false);
     }
   };
+
+  // Atualiza os fornecedores quando os filtros mudam
+  useEffect(() => {
+    loadSuppliers();
+  }, [filters]);
 
   const toggleSupplier = (supplierId: string) => {
     setSelectedSuppliers(prev =>
@@ -179,7 +217,8 @@ Quantidade: ${part.quantity}`
           areaCode: supplier.area_code,
           phone: supplier.phone,
           message,
-          imageUrl: coverImage,
+          imageUrl: coverImage || undefined,
+          documentUrl: undefined,
           useTemplates: true
         };
       });
@@ -206,28 +245,29 @@ Quantidade: ${part.quantity}`
     }
   };
 
-  const filteredSuppliers = suppliers.filter(supplier => {
-    if (filters.ddd && supplier.area_code !== filters.ddd) return false;
-    if (filters.city && !supplier.city.toLowerCase().includes(filters.city.toLowerCase())) return false;
-    if (filters.state && supplier.state.toLowerCase() !== filters.state.toLowerCase()) return false;
-    if (filters.specialization && !supplier.categories?.includes(filters.specialization)) return false;
-    if (filters.part_type && !supplier.categories?.includes(filters.part_type)) return false;
-    if (filters.name && !supplier.name.toLowerCase().includes(filters.name.toLowerCase())) return false;
-    return true;
-  });
-
   const handleSelectAll = () => {
-    const allSelected = filteredSuppliers.every(supplier => 
+    const allSelected = suppliers.every(supplier => 
       selectedSuppliers.includes(supplier.id)
     );
     
     if (allSelected) {
-      // Se todos já estão selecionados, desmarca todos
-      setSelectedSuppliers([]);
+      // Se todos já estão selecionados, desmarca apenas os fornecedores atualmente filtrados
+      const newSelectedSuppliers = selectedSuppliers.filter(
+        id => !suppliers.some(supplier => supplier.id === id)
+      );
+      setSelectedSuppliers(newSelectedSuppliers);
     } else {
-      // Senão, seleciona todos os fornecedores filtrados
-      setSelectedSuppliers(filteredSuppliers.map(s => s.id));
+      // Senão, adiciona os fornecedores filtrados aos já selecionados
+      const supplierIdsToAdd = suppliers
+        .filter(supplier => !selectedSuppliers.includes(supplier.id))
+        .map(supplier => supplier.id);
+      
+      setSelectedSuppliers([...selectedSuppliers, ...supplierIdsToAdd]);
     }
+  };
+
+  const handleClearSelection = () => {
+    setSelectedSuppliers([]);
   };
 
   return (
@@ -328,9 +368,9 @@ Quantidade: ${part.quantity}`
               className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
             >
               <option value="">Todos</option>
-              <option value="genuine">Genuínas</option>
-              <option value="new">Novas</option>
-              <option value="used">Usadas</option>
+              <option value="new">Apenas peças novas</option>
+              <option value="used">Apenas peças usadas</option>
+              <option value="all">Todas</option>
             </select>
           </div>
 
@@ -340,11 +380,16 @@ Quantidade: ${part.quantity}`
               value={filters.specialization}
               onChange={e => setFilters(prev => ({ ...prev, specialization: e.target.value }))}
               className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+              data-component-name="SupplierSelection"
             >
-              <option value="">Todas</option>
-              {Array.from(new Set(suppliers.flatMap(s => s.categories || []))).sort().map(category => (
-                <option key={category} value={category}>{category}</option>
-              ))}
+              <option value="">Todos</option>
+              <option value="bodywork">Lataria</option>
+              <option value="mechanical">Mecânica</option>
+              <option value="lights">Faróis, Lanternas e Retrovisores</option>
+              <option value="tires">Pneus</option>
+              <option value="finishing">Acabamento</option>
+              <option value="others">Outros</option>
+              <option value="all">Todos</option>
             </select>
           </div>
         </div>
@@ -352,7 +397,13 @@ Quantidade: ${part.quantity}`
         {/* Lista de Fornecedores */}
         <div className="mt-4 space-y-4">
           <div className="flex justify-between items-center">
-            <h3 className="text-lg font-medium">Fornecedores</h3>
+            <div>
+              <h3 className="text-lg font-medium">Fornecedores</h3>
+              <p className="text-sm text-gray-500">
+                {suppliers.length} fornecedor{suppliers.length !== 1 ? 'es' : ''} filtrado{suppliers.length !== 1 ? 's' : ''} |  
+                {selectedSuppliers.length} selecionado{selectedSuppliers.length !== 1 ? 's' : ''}
+              </p>
+            </div>
             <div className="flex items-center gap-4">
               <div className="relative w-64">
                 <input
@@ -369,7 +420,16 @@ Quantidade: ${part.quantity}`
                 type="button"
                 className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
               >
-                Selecionar Todos
+                {suppliers.every(supplier => selectedSuppliers.includes(supplier.id))
+                  ? "Desmarcar Todos"
+                  : "Selecionar Todos"}
+              </button>
+              <button
+                onClick={handleClearSelection}
+                type="button"
+                className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              >
+                Limpar Seleção
               </button>
             </div>
           </div>
@@ -378,9 +438,9 @@ Quantidade: ${part.quantity}`
             <div className="flex justify-center items-center h-32">
               <Loader2 className="w-8 h-8 animate-spin text-gray-500" />
             </div>
-          ) : filteredSuppliers.length > 0 ? (
+          ) : suppliers.length > 0 ? (
             <div className="space-y-4">
-              {filteredSuppliers.map(supplier => (
+              {suppliers.map(supplier => (
                 <div
                   key={supplier.id}
                   className={`flex items-center justify-between p-4 border rounded-lg cursor-pointer transition-colors ${

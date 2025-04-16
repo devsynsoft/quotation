@@ -41,6 +41,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 <Users className="w-5 h-5 mr-3" />
                 Fornecedores
               </Link>
+              <Link to="/specializations" className="flex items-center px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">
+                <Settings className="w-5 h-5 mr-3" />
+                Especializações
+              </Link>
               <Link to="/workshops" className="flex items-center px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">
                 <Wrench className="w-5 h-5 mr-3" />
                 Oficinas

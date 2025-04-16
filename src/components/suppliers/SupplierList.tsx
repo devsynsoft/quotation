@@ -167,37 +167,65 @@ export function SupplierList() {
 
   async function handleDelete(e: React.MouseEvent, supplierId: string) {
     e.stopPropagation();
-
-    if (!window.confirm('Tem certeza que deseja excluir este fornecedor?')) {
-      return;
-    }
-
-    try {
-      // Primeiro verifica se há cotações relacionadas usando uma query raw
-      const { data: quotationRequests, error: quotationError } = await supabase
-        .rpc('check_supplier_quotations', {
-          supplier_id: supplierId
-        });
-
-      if (quotationError) throw quotationError;
-
-      if (quotationRequests && quotationRequests.length > 0) {
-        toast.error('Não é possível excluir este fornecedor pois existem cotações associadas a ele');
-        return;
+    
+    if (window.confirm('Tem certeza que deseja excluir este fornecedor?')) {
+      try {
+        console.log('Iniciando processo de exclusão do fornecedor:', supplierId);
+        
+        // 1. Remover referências em quotation_requests
+        const { error: quotationRequestsError } = await supabase
+          .from('quotation_requests')
+          .delete()
+          .eq('supplier_id', supplierId);
+        
+        if (quotationRequestsError) {
+          console.error('Erro ao excluir quotation_requests:', quotationRequestsError);
+        } else {
+          console.log('quotation_requests removidos com sucesso');
+        }
+        
+        // 2. Remover referências em counter_offers
+        const { error: counterOffersError } = await supabase
+          .from('counter_offers')
+          .delete()
+          .eq('supplier_id', supplierId);
+        
+        if (counterOffersError) {
+          console.error('Erro ao excluir counter_offers:', counterOffersError);
+        } else {
+          console.log('counter_offers removidos com sucesso');
+        }
+        
+        // 3. Remover referências em purchase_orders
+        const { error: purchaseOrdersError } = await supabase
+          .from('purchase_orders')
+          .delete()
+          .eq('supplier_id', supplierId);
+        
+        if (purchaseOrdersError) {
+          console.error('Erro ao excluir purchase_orders:', purchaseOrdersError);
+        } else {
+          console.log('purchase_orders removidos com sucesso');
+        }
+        
+        // 4. Finalmente, excluir o fornecedor
+        const { error: supplierError } = await supabase
+          .from('suppliers')
+          .delete()
+          .eq('id', supplierId);
+        
+        if (supplierError) {
+          console.error('Erro ao excluir fornecedor:', supplierError);
+          toast.error('Erro ao excluir fornecedor: ' + supplierError.message);
+        } else {
+          console.log('Fornecedor excluído com sucesso');
+          toast.success('Fornecedor excluído com sucesso');
+          fetchSuppliers();
+        }
+      } catch (err) {
+        console.error('Erro geral ao excluir fornecedor:', err);
+        toast.error('Erro ao excluir fornecedor');
       }
-
-      const { error } = await supabase
-        .from('suppliers')
-        .delete()
-        .eq('id', supplierId);
-
-      if (error) throw error;
-
-      toast.success('Fornecedor excluído com sucesso');
-      fetchSuppliers();
-    } catch (err) {
-      console.error('Erro ao excluir fornecedor:', err);
-      toast.error('Erro ao excluir fornecedor');
     }
   }
 

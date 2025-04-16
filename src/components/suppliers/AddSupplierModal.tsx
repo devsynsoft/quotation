@@ -3,6 +3,21 @@ import { Loader2, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { Database } from '../../lib/database.types';
 import { FormField, FormSelect, FormStyles } from '../ui/forms';
+
+// Mapeamento para exibição amigável
+const SPECIALIZATION_LABELS: Record<string, string> = {
+  bodywork: 'Lataria',
+  mechanical: 'Mecânica',
+  lights: 'Elétrica',
+  finishing: 'Acabamento',
+  others: 'Outros',
+  all: 'Todas',
+};
+
+type Specialization = {
+  id: string;
+  name: string;
+};
 import { useAuth } from '../../hooks/useAuth';
 import { useIBGE } from '../../hooks/useIBGE';
 
@@ -34,8 +49,11 @@ export function AddSupplierModal({ isOpen, onClose, onSuccess, initialData }: Ad
     neighborhood: initialData?.neighborhood || '',
     zip_code: initialData?.zip_code || '',
     parts_type: initialData?.parts_type || 'new',
-    specialization: initialData?.specialization || 'all'
+    specialization_id: initialData?.specialization_id || '', // novo campo
   });
+
+  const [specializations, setSpecializations] = React.useState<Specialization[]>([]);
+  const [loadingSpecializations, setLoadingSpecializations] = React.useState(false);
 
   // Atualiza os dados do fornecedor quando o modal abrir
   React.useEffect(() => {
@@ -53,10 +71,9 @@ export function AddSupplierModal({ isOpen, onClose, onSuccess, initialData }: Ad
           neighborhood: initialData.neighborhood || '',
           zip_code: initialData.zip_code || '',
           parts_type: initialData.parts_type || 'new',
-          specialization: initialData.specialization || 'all'
+          specialization_id: initialData.specialization_id || '',
         });
       } else {
-        // Limpa os dados quando não houver initialData
         setSupplier({
           name: '',
           phone: '',
@@ -69,11 +86,26 @@ export function AddSupplierModal({ isOpen, onClose, onSuccess, initialData }: Ad
           neighborhood: '',
           zip_code: '',
           parts_type: 'all',
-          specialization: 'all'
+          specialization_id: '',
         });
       }
     }
   }, [isOpen, initialData]);
+
+  // Buscar especializações dinâmicas
+  React.useEffect(() => {
+    setLoadingSpecializations(true);
+    supabase
+      .from('specializations')
+      .select('id, name')
+      .order('name')
+      .then(({ data, error }) => {
+        if (!error && data) {
+          setSpecializations(data);
+        }
+        setLoadingSpecializations(false);
+      });
+  }, [isOpen]);
 
   // Busca cidades quando o estado muda
   React.useEffect(() => {
@@ -103,19 +135,67 @@ export function AddSupplierModal({ isOpen, onClose, onSuccess, initialData }: Ad
 
   if (!isOpen) return null;
 
-  function validateForm(): string {
+  // Verifica se o telefone contém apenas números
+  function isNumeric(value: string): boolean {
+    return /^\d+$/.test(value);
+  }
+
+  // Verifica se já existe um fornecedor com o mesmo telefone
+  async function checkPhoneExists(): Promise<string | null> {
+    try {
+      const { data, error } = await supabase
+        .from('suppliers')
+        .select('id, name')
+        .eq('area_code', supplier.area_code)
+        .eq('phone', supplier.phone);
+
+      if (error) throw error;
+
+      // Se estiver editando um fornecedor, ignora o próprio fornecedor
+      if (data && data.length > 0) {
+        const existingSupplier = data.find(s => !initialData || s.id !== initialData.id);
+        if (existingSupplier) {
+          return `Telefone já cadastrado para o fornecedor "${existingSupplier.name}"`;
+        }
+      }
+
+      return null;
+    } catch (err) {
+      console.error('Erro ao verificar telefone:', err);
+      return 'Erro ao verificar telefone. Por favor, tente novamente.';
+    }
+  }
+
+  async function validateForm(): Promise<string> {
     if (!supplier.name.trim()) {
       return 'Nome é obrigatório';
     }
     if (!supplier.phone.trim()) {
       return 'Telefone é obrigatório';
     }
+    // Validação de formato do telefone
+    if (!isNumeric(supplier.phone)) {
+      return 'Telefone deve conter apenas números';
+    }
+    if (supplier.phone.length > 9) {
+      return 'Telefone deve ter no máximo 9 dígitos';
+    }
     if (!supplier.area_code.trim()) {
       return 'DDD é obrigatório';
+    }
+    if (!isNumeric(supplier.area_code)) {
+      return 'DDD deve conter apenas números';
     }
     if (supplier.area_code.length > 3) {
       return 'DDD deve ter no máximo 3 dígitos';
     }
+    
+    // Verifica se o telefone já existe
+    const phoneError = await checkPhoneExists();
+    if (phoneError) {
+      return phoneError;
+    }
+    
     if (!selectedStateId) {
       return 'Estado é obrigatório';
     }
@@ -128,7 +208,7 @@ export function AddSupplierModal({ isOpen, onClose, onSuccess, initialData }: Ad
     if (!supplier.parts_type) {
       return 'Tipo de peças é obrigatório';
     }
-    if (!supplier.specialization) {
+    if (!supplier.specialization_id) {
       return 'Especialização é obrigatória';
     }
     return '';
@@ -136,10 +216,12 @@ export function AddSupplierModal({ isOpen, onClose, onSuccess, initialData }: Ad
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setLoading(true);
     
-    const validationError = validateForm();
+    const validationError = await validateForm();
     if (validationError) {
       setError(validationError);
+      setLoading(false);
       return;
     }
 
@@ -162,7 +244,8 @@ export function AddSupplierModal({ isOpen, onClose, onSuccess, initialData }: Ad
       const supplierData = {
         ...supplier,
         state: selectedState.sigla,
-        city: selectedCity.nome
+        city: selectedCity.nome,
+        specialization_id: supplier.specialization_id,
       };
 
       const { data, error: dbError } = initialData
@@ -240,17 +323,28 @@ export function AddSupplierModal({ isOpen, onClose, onSuccess, initialData }: Ad
               label="DDD"
               type="text"
               value={supplier.area_code}
-              onChange={(e) => setSupplier(prev => ({ ...prev, area_code: e.target.value }))}
+              onChange={(e) => {
+                // Permite apenas números e limita a 3 dígitos
+                const value = e.target.value.replace(/\D/g, '').slice(0, 3);
+                setSupplier(prev => ({ ...prev, area_code: value }));
+              }}
               required
               maxLength={3}
+              placeholder="Apenas números"
             />
 
             <FormField
               label="Telefone"
               type="text"
               value={supplier.phone}
-              onChange={(e) => setSupplier(prev => ({ ...prev, phone: e.target.value }))}
+              onChange={(e) => {
+                // Permite apenas números e limita a 9 dígitos
+                const value = e.target.value.replace(/\D/g, '').slice(0, 9);
+                setSupplier(prev => ({ ...prev, phone: value }));
+              }}
               required
+              maxLength={9}
+              placeholder="Apenas números - máx. 9 dígitos"
             />
           </div>
 
@@ -339,17 +433,17 @@ export function AddSupplierModal({ isOpen, onClose, onSuccess, initialData }: Ad
 
             <FormSelect
               label="Especialização"
-              value={supplier.specialization}
-              onChange={(e) => setSupplier(prev => ({ ...prev, specialization: e.target.value }))}
+              value={supplier.specialization_id}
+              onChange={e => setSupplier(prev => ({ ...prev, specialization_id: e.target.value }))}
               required
+              disabled={loadingSpecializations}
             >
-              <option value="bodywork">Lataria</option>
-              <option value="mechanical">Mecânica</option>
-              <option value="lights">Faróis, Lanternas e Retrovisores</option>
-              <option value="tires">Pneus</option>
-              <option value="finishing">Acabamento</option>
-              <option value="others">Outros</option>
-              <option value="all">Todos</option>
+              <option value="">Selecione uma especialização</option>
+              {specializations.map(spec => (
+                <option key={spec.id} value={spec.id}>
+                  {SPECIALIZATION_LABELS[spec.name] || spec.name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                </option>
+              ))}
             </FormSelect>
           </div>
 

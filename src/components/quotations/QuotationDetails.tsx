@@ -127,6 +127,8 @@ export function QuotationDetails() {
     state: string;
   } | null>(null);
   const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null);
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [suppliersListCollapsed, setSuppliersListCollapsed] = useState(true);
   const [showImages, setShowImages] = useState(false);
   const [counterOfferModalOpen, setCounterOfferModalOpen] = useState(false);
@@ -369,8 +371,30 @@ Quantidade: ${part.quantity}`)
     return message;
   };
 
-  const handleImageSelect = (image: string) => {
-    setSelectedImageUrl(selectedImageUrl === image ? null : image);
+  const handleImageSelect = (imageUrl: string, index: number) => {
+    setSelectedImageUrl(imageUrl);
+    setCurrentImageIndex(index);
+    setIsImageModalOpen(true);
+  };
+
+  const handleNextImage = () => {
+    if (quotation?.images && quotation.images.length > 0) {
+      const nextIndex = (currentImageIndex + 1) % quotation.images.length;
+      setCurrentImageIndex(nextIndex);
+      setSelectedImageUrl(quotation.images[nextIndex]);
+    }
+  };
+
+  const handlePreviousImage = () => {
+    if (quotation?.images && quotation.images.length > 0) {
+      const prevIndex = (currentImageIndex - 1 + quotation.images.length) % quotation.images.length;
+      setCurrentImageIndex(prevIndex);
+      setSelectedImageUrl(quotation.images[prevIndex]);
+    }
+  };
+
+  const closeImageModal = () => {
+    setIsImageModalOpen(false);
   };
 
   const resendToSupplier = async (request: QuotationRequest) => {
@@ -766,6 +790,60 @@ ${message}`;
 
   return (
     <div className="container mx-auto px-4 py-8">
+      {/* Modal de visualização de imagens */}
+      {isImageModalOpen && selectedImageUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75">
+          <div className="relative max-w-4xl w-full h-full max-h-screen flex flex-col items-center justify-center p-4">
+            {/* Botão de fechar */}
+            <button
+              onClick={closeImageModal}
+              className="absolute top-4 right-4 text-white hover:text-gray-300 z-10"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            
+            {/* Imagem */}
+            <div className="relative w-full h-full flex items-center justify-center">
+              <img
+                src={selectedImageUrl}
+                alt="Imagem ampliada"
+                className="max-h-full max-w-full object-contain"
+                onError={(e) => {
+                  console.error('Erro ao carregar imagem:', e);
+                  e.currentTarget.src = '/placeholder-image.jpg';
+                }}
+              />
+              
+              {/* Botões de navegação */}
+              <button
+                onClick={handlePreviousImage}
+                className="absolute left-2 bg-black bg-opacity-50 text-white rounded-full p-2 hover:bg-opacity-75"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+              
+              <button
+                onClick={handleNextImage}
+                className="absolute right-2 bg-black bg-opacity-50 text-white rounded-full p-2 hover:bg-opacity-75"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            </div>
+            
+            {/* Contador de imagens */}
+            <div className="text-white mt-2">
+              {currentImageIndex + 1} / {quotation?.images?.length || 0}
+            </div>
+          </div>
+        </div>
+      )}
+      
       <div className="flex justify-between items-center mb-6">
         <button
           onClick={() => navigate('/quotations')}
@@ -780,16 +858,67 @@ ${message}`;
           className="inline-flex items-center text-sm text-blue-600 hover:text-blue-800"
         >
           <Edit className="w-4 h-4 mr-2" />
-          Editar Cotação
+          Clonar Campanha
         </button>
       </div>
 
       <div className="bg-white shadow rounded-lg p-6 mb-6">
         <h1 className="text-2xl font-bold mb-4">Detalhes da Cotação</h1>
 
-        {/* Imagens do Veículo */}
+        {/* Detalhes do Veículo */}
+        <div className="mb-6 hidden">
+          <h2 className="text-lg font-medium mb-2">Veículo</h2>
+          <p>
+            {quotation.vehicle?.brand} {quotation.vehicle?.model} {quotation.vehicle?.year}
+            {quotation.vehicle?.chassis && ` - Chassi: ${quotation.vehicle.chassis}`}
+          </p>
+        </div>
+        
         {quotation.images && quotation.images.length > 0 && (
-          <div className="mb-6">
+  <div className="bg-indigo-50 rounded-lg p-4 mb-6">
+    <img
+      src={quotation.images[0]}
+      alt={`${quotation.vehicle?.brand} ${quotation.vehicle?.model}`}
+      className="w-full max-w-xs h-auto rounded-lg shadow-md cursor-pointer"
+      onClick={() => handleImageSelect(quotation.images[0], 0)}
+      onError={(e) => {
+        console.error('Erro ao carregar imagem:', e);
+        e.currentTarget.src = '/placeholder-image.jpg';
+      }}
+    />
+
+    {/* Botão de Imagens do Veículo */}
+    <button 
+      onClick={() => setShowImages(!showImages)} 
+      className="flex items-center text-lg font-medium my-4 text-left w-full"
+    >
+      <span className="mr-2">{showImages ? '▼' : '►'}</span>
+      Imagens ({quotation.images.length})
+    </button>
+    {showImages && (
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+        {quotation.images.map((image, index) => (
+          <div key={index} className="relative">
+            <img
+              src={image}
+              alt={`Imagem ${index + 1}`}
+              className={`w-full h-32 object-cover rounded-lg cursor-pointer ${selectedImageUrl === image ? 'ring-2 ring-blue-500' : ''}`}
+              onClick={() => handleImageSelect(image, index)}
+              onError={(e) => {
+                console.error('Erro ao carregar imagem:', e);
+                e.currentTarget.src = '/placeholder-image.jpg';
+              }}
+            />
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+)}
+
+        {/* Botão de Imagens do Veículo */}
+        {quotation.images && quotation.images.length > 0 && (
+          <div className="mb-6 hidden">
             <button 
               onClick={() => setShowImages(!showImages)} 
               className="flex items-center text-lg font-medium mb-2 text-left w-full"
@@ -808,7 +937,7 @@ ${message}`;
                       className={`w-full h-32 object-cover rounded-lg cursor-pointer ${
                         selectedImageUrl === image ? 'ring-2 ring-blue-500' : ''
                       }`}
-                      onClick={() => handleImageSelect(image)}
+                      onClick={() => handleImageSelect(image, index)}
                       onError={(e) => {
                         console.error('Erro ao carregar imagem:', e);
                         e.currentTarget.src = '/placeholder-image.jpg';
@@ -821,37 +950,7 @@ ${message}`;
           </div>
         )}
 
-        {/* Detalhes do Veículo */}
-        <div className="mb-6">
-          <h2 className="text-lg font-medium mb-2">Veículo</h2>
-          <div className="flex flex-col md:flex-row md:items-start gap-4">
-            {/* Informações do veículo */}
-            <div className="flex-1">
-              <p>
-                {quotation.vehicle?.brand} {quotation.vehicle?.model} {quotation.vehicle?.year}
-                {quotation.vehicle?.chassis && ` - Chassi: ${quotation.vehicle.chassis}`}
-              </p>
-            </div>
-            
-            {/* Imagem principal do veículo */}
-            {quotation.images && quotation.images.length > 0 && (
-              <div className="flex-shrink-0">
-                <img
-                  src={quotation.images[0]}
-                  alt={`${quotation.vehicle?.brand} ${quotation.vehicle?.model}`}
-                  className="w-full max-w-xs h-auto rounded-lg shadow-md"
-                  onError={(e) => {
-                    console.error('Erro ao carregar imagem:', e);
-                    e.currentTarget.src = '/placeholder-image.jpg';
-                  }}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Lista de Peças */}
-        <div className="mb-6">
+        <div className="bg-yellow-50 rounded-lg p-4 mb-6">
           <h2 className="text-lg font-medium mb-2">Peças Solicitadas</h2>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -1172,7 +1271,7 @@ ${message}`;
               );
             })()}
 
-            <div className="space-y-6">
+            <div className="bg-purple-50 rounded-lg p-4 space-y-6">
               {Object.entries(
                 bestPrices.reduce((acc, part) => {
                   const supplierId = part.supplier.id;
@@ -1341,7 +1440,7 @@ ${message}`;
 
         {/* Log da API */}
         {apiLog && (
-          <div className="mt-6">
+          <div className="bg-gray-50 rounded-lg p-4 mt-6">
             <h2 className="text-lg font-medium mb-2">Log de Envio</h2>
             <pre className="bg-gray-100 p-4 rounded-lg text-sm whitespace-pre-wrap">
               {apiLog}
@@ -1349,8 +1448,7 @@ ${message}`;
           </div>
         )}
 
-        {/* Lista de Fornecedores */}
-        <div className="mb-6">
+        <div className="bg-green-50 rounded-lg p-4 mb-6">
           <div 
             className={`flex justify-between items-center p-3 cursor-pointer rounded-lg transition-colors duration-200 ${suppliersListCollapsed ? 'bg-gray-100 hover:bg-gray-200' : 'mb-4'}`}
             onClick={() => setSuppliersListCollapsed(!suppliersListCollapsed)}

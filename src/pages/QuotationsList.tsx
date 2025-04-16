@@ -17,6 +17,7 @@ interface Quotation {
   vehicle_id: string;
   vehicles?: Vehicle;
   suppliers_count?: number;
+  responses_count?: number;
   first_send_time?: string;
   last_send_time?: string;
   vehicle_image?: string;
@@ -93,6 +94,21 @@ const QuotationsList = () => {
           console.error('Erro ao buscar quotation_requests:', requestsError);
           return quotation;
         }
+        
+        // Buscar o número de respostas recebidas
+        // As respostas são armazenadas na tabela quotation_requests com status 'responded' ou com response_data preenchido
+        const { data: responsesData, error: responsesError } = await supabase
+          .from('quotation_requests')
+          .select('id')
+          .eq('quotation_id', quotation.id)
+          .not('response_data', 'is', null);
+
+        if (responsesError) {
+          console.error('Erro ao buscar respostas:', responsesError);
+        }
+        
+        const responsesCount = responsesData?.length || 0;
+        console.log(`Cotação ${quotation.id}: ${responsesCount} respostas encontradas`);
 
         // Buscar imagem do veículo
         let vehicleImage: string | undefined = undefined;
@@ -128,6 +144,7 @@ const QuotationsList = () => {
           return {
             ...quotation,
             suppliers_count: uniqueSuppliers.size,
+            responses_count: responsesCount,
             first_send_time: firstSendTime,
             last_send_time: lastSendTime,
             vehicle_image: vehicleImage
@@ -136,6 +153,7 @@ const QuotationsList = () => {
 
         return {
           ...quotation,
+          responses_count: responsesCount,
           vehicle_image: vehicleImage
         };
       }));
@@ -272,6 +290,10 @@ const QuotationsList = () => {
                     )}
                   </p>
                 )}
+                <p className="text-sm text-gray-700">
+                  <span className="font-medium">Respostas recebidas:</span> {quotation.responses_count || 0}
+                  {quotation.suppliers_count ? ` de ${quotation.suppliers_count}` : ''}
+                </p>
               </div>
             </div>
             

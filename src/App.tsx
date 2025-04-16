@@ -30,6 +30,7 @@ import WorkshopList from './pages/workshops/WorkshopList';
 import WorkshopForm from './pages/workshops/WorkshopForm';
 import BillingCompanyList from './pages/billing/BillingCompanyList';
 import BillingCompanyForm from './pages/billing/BillingCompanyForm';
+import SpecializationList from './components/specializations/SpecializationList';
 
 function ProtectedRoutes() {
   const { user } = React.useContext(AuthContext);
@@ -57,6 +58,8 @@ function ProtectedRoutes() {
           <Route path="/purchase-orders/:id" element={<PurchaseOrderDetails />} />
           <Route path="/admin/companies" element={<CompanyList />} />
           <Route path="/admin/companies/new" element={<CompanyForm />} />
+          {/* Rotas de Especializações */}
+          <Route path="/specializations" element={<SpecializationList />} />
           {/* Rotas de Oficinas */}
           <Route path="/workshops" element={<WorkshopList />} />
           <Route path="/workshops/new" element={<WorkshopForm />} />

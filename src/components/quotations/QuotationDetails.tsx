@@ -256,6 +256,8 @@ export function QuotationDetails() {
       const { data, error } = await supabase
         .from('message_templates')
         .select('content')
+        .eq('is_default', true)
+        .order('is_global', { ascending: true })
         .order('sequence', { ascending: true })
         .limit(1);
 

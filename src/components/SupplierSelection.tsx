@@ -64,10 +64,14 @@ const SupplierSelection: React.FC<SupplierSelectionProps> = ({
         .from('message_templates')
         .select('content')
         .eq('is_default', true)
-        .single();
+        .order('is_global', { ascending: true })
+        .order('sequence', { ascending: true })
+        .limit(1);
 
       if (error) throw error;
-      if (data) {
+
+      const templateContent = data?.[0]?.content;
+      if (templateContent) {
         // Monta a mensagem com as variáveis
         let message = '';
         

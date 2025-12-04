@@ -690,31 +690,32 @@ if (finalQuotationData.vehicle && finalQuotationData.vehicle.images) {
   const handlePartChange = (index: number, field: string, value: any) => {
     setResponse(prev => {
       const newParts = [...prev.parts];
-      
+      const updatedPart = { ...newParts[index] };
+
       if (field === 'condition') {
-        newParts[index] = {
-          ...newParts[index],
-          [field]: value as 'new' | 'used'
-        };
+        updatedPart.condition = value as 'new' | 'used';
+      } else if (field === 'unit_price') {
+        const numericValue = Math.max(0, value || 0);
+        updatedPart.unit_price = numericValue;
+
+        if (numericValue > 0) {
+          updatedPart.available = true;
+          updatedPart.total_price = numericValue * updatedPart.quantity;
+        } else {
+          updatedPart.available = false;
+          updatedPart.total_price = 0;
+        }
+      } else if (field === 'available') {
+        updatedPart.available = value;
+        if (!value) {
+          updatedPart.unit_price = 0;
+          updatedPart.total_price = 0;
+        }
       } else {
-        newParts[index] = {
-          ...newParts[index],
-          [field]: value
-        };
+        (updatedPart as any)[field] = value;
       }
 
-      if (field === 'available' && !value) {
-        newParts[index].unit_price = 0;
-        newParts[index].total_price = 0;
-      }
-      
-      if (field === 'unit_price' && value > 0) {
-        newParts[index].available = true;
-      }
-
-      if (field === 'unit_price' && newParts[index].available) {
-        newParts[index].total_price = value * newParts[index].quantity;
-      }
+      newParts[index] = updatedPart;
 
       const totalPrice = newParts.reduce((sum, part) => 
         sum + (part.available ? (part.total_price || 0) : 0), 0);
@@ -757,15 +758,35 @@ if (finalQuotationData.vehicle && finalQuotationData.vehicle.images) {
       return;
     }
 
-    if (response.parts.some(part => part.available && !part.unit_price)) {
+    const sanitizedParts = response.parts.map(part => {
+      const hasPrice = !!part.unit_price && part.unit_price > 0;
+      return {
+        ...part,
+        available: hasPrice,
+        total_price: hasPrice ? part.quantity * part.unit_price : 0,
+      };
+    });
+
+    const availableParts = sanitizedParts.filter(part => part.available);
+
+    if (availableParts.some(part => !part.unit_price)) {
       customToast.error('Por favor, preencha o preço de todas as peças disponíveis');
       return;
     }
 
-    if (response.parts.some(part => part.available && !part.condition)) {
+    if (availableParts.some(part => !part.condition)) {
       customToast.error('Por favor, selecione a condição (nova ou usada) para todas as peças disponíveis');
       return;
     }
+
+    const updatedTotalPrice = sanitizedParts.reduce((sum, part) => 
+      sum + (part.available ? (part.total_price || 0) : 0), 0);
+
+    const responsePayload = {
+      ...response,
+      parts: sanitizedParts,
+      total_price: updatedTotalPrice,
+    };
 
     try {
       setSubmitting(true);
@@ -774,13 +795,14 @@ if (finalQuotationData.vehicle && finalQuotationData.vehicle.images) {
         .from('quotation_requests')
         .update({
           status: 'responded',
-          response_data: response,
+          response_data: responsePayload,
           responded_at: new Date().toISOString()
         })
         .eq('id', requestId);
 
       if (updateError) throw updateError;
 
+      setResponse(responsePayload);
       customToast.success('Cotação enviada com sucesso!');
       setSubmitted(true);
     } catch (err: any) {

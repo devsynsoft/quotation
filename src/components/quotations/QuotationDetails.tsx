@@ -2,9 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2, RefreshCw, Send, Edit, MessageCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { sendBulkWhatsAppMessages } from '../../services/evolutionApi';
+import { sendNotification } from '../../services/notificationWebhook';
 import { customToast } from '../../lib/toast';
-import { useAuth } from '../../hooks/useAuth';
 import { Link } from 'react-router-dom';
 import CounterOfferModal from './CounterOfferModal';
 
@@ -408,38 +407,49 @@ Quantidade: ${part.quantity}`)
     try {
       setSendingMessages(prev => ({ ...prev, [request.supplier_id]: true }));
 
-      if (!request.supplier.area_code || !request.supplier.phone) {
-        throw new Error(`Fornecedor ${request.supplier.name} não tem DDD ou telefone cadastrado`);
+      const partsText = formatMessage(messageTemplate);
+      const supplierLink = `${window.location.origin}/quotation-response/${quotation.id}/${request.id}`;
+
+      const payload = {
+        quotation_id: quotation.id,
+        vehicle: {
+          brand: quotation.vehicle?.brand || null,
+          model: quotation.vehicle?.model || null,
+          year: quotation.vehicle?.year || null,
+          chassis: quotation.vehicle?.chassis || null
+        },
+        requests: [
+          {
+            request_id: request.id,
+            supplier: {
+              id: request.supplier.id,
+              name: request.supplier.name || null,
+              phone: request.supplier.phone || null,
+              area_code: request.supplier.area_code || null
+            },
+            supplier_link: supplierLink,
+            parts: (quotation.parts || []).map(part => ({
+              operation: part.operation || '',
+              code: part.code || '',
+              description: part.description,
+              part_type: part.part_type || '',
+              quantity: part.quantity,
+              painting_hours: part.painting_hours
+            })),
+            parts_text: partsText,
+            cover_image: selectedImageUrl || null
+          }
+        ]
+      };
+
+      setApiLog(prev => prev + '\n\nEnviando payload para ' + request.supplier.name + ':\n' + JSON.stringify(payload, null, 2));
+
+      const { success, error } = await sendNotification(payload);
+      if (!success) {
+        throw (error || new Error('Falha ao enviar dados ao webhook'));
       }
 
-      let message = formatMessage(messageTemplate);
-      message += `{quotation_link}${window.location.origin}/quotation-response/${quotation.id}/${request.id}`;
-
-      const logMessage = `Enviando mensagem para ${request.supplier.name}:
-Telefone: ${request.supplier.area_code}${request.supplier.phone}
-Mensagem:
-${message}`;
-      setApiLog(prev => prev + '\n\n' + logMessage);
-
-      // Envia a mensagem usando os templates
-      await sendBulkWhatsAppMessages([{
-        areaCode: request.supplier.area_code,
-        phone: request.supplier.phone,
-        message,
-        useTemplates: true
-      }], user.id);
-
-      // Se houver imagem selecionada, envia por último
-      if (selectedImageUrl) {
-        await sendBulkWhatsAppMessages([{
-          areaCode: request.supplier.area_code,
-          phone: request.supplier.phone,
-          message: '',
-          imageUrl: selectedImageUrl
-        }], user.id);
-      }
-
-      setApiLog(prev => prev + '\n✅ Mensagem enviada com sucesso!');
+      setApiLog(prev => prev + '\n✅ Notificação enviada com sucesso!');
 
       await supabase
         .from('quotation_requests')
@@ -468,8 +478,10 @@ ${message}`;
 
     try {
       setSendingMessages({ ...sendingMessages, all: true });
+      const partsText = formatMessage(messageTemplate);
+
       const validRequests = requests.filter(request => 
-        request.supplier.area_code && 
+        request.supplier.area_code &&
         request.supplier.phone
       );
 
@@ -477,39 +489,50 @@ ${message}`;
         throw new Error('Nenhum fornecedor tem DDD e telefone cadastrados');
       }
 
-      // Envia a mensagem para todos usando os templates
-      const textMessages = validRequests.map(request => {
-        let message = formatMessage(messageTemplate);
-        message += `{quotation_link}${window.location.origin}/quotation-response/${quotation.id}/${request.id}`;
+      const requestPayloads = validRequests.map(request => {
+        const supplierLink = `${window.location.origin}/quotation-response/${quotation.id}/${request.id}`;
 
-        const logMessage = `Enviando mensagem para ${request.supplier.name}:
-Telefone: ${request.supplier.area_code}${request.supplier.phone}
-Mensagem:
-${message}`;
-        setApiLog(prev => prev + '\n\n' + logMessage);
-
-        return { 
-          areaCode: request.supplier.area_code,
-          phone: request.supplier.phone,
-          message,
-          useTemplates: true
+        return {
+          request_id: request.id,
+          supplier: {
+            id: request.supplier.id,
+            name: request.supplier.name || null,
+            phone: request.supplier.phone || null,
+            area_code: request.supplier.area_code || null
+          },
+          supplier_link: supplierLink,
+          parts: (quotation.parts || []).map(part => ({
+            operation: part.operation || '',
+            code: part.code || '',
+            description: part.description,
+            part_type: part.part_type || '',
+            quantity: part.quantity,
+            painting_hours: part.painting_hours
+          })),
+          parts_text: partsText,
+          cover_image: selectedImageUrl || null
         };
       });
 
-      await sendBulkWhatsAppMessages(textMessages, user.id);
+      const payload = {
+        quotation_id: quotation.id,
+        vehicle: {
+          brand: quotation.vehicle?.brand || null,
+          model: quotation.vehicle?.model || null,
+          year: quotation.vehicle?.year || null,
+          chassis: quotation.vehicle?.chassis || null
+        },
+        requests: requestPayloads
+      };
 
-      // Se houver imagem selecionada, envia por último para todos
-      if (selectedImageUrl) {
-        const imageMessages = validRequests.map(request => ({
-          areaCode: request.supplier.area_code,
-          phone: request.supplier.phone,
-          message: '',
-          imageUrl: selectedImageUrl
-        }));
+      setApiLog(prev => prev + '\n\nEnviando payload agregado:\n' + JSON.stringify(payload, null, 2));
 
-        await sendBulkWhatsAppMessages(imageMessages, user.id);
+      const { success, error } = await sendNotification(payload);
+      if (!success) {
+        throw (error || new Error('Falha ao enviar dados ao webhook'));
       }
-      setApiLog(prev => prev + '\n✅ Mensagens enviadas com sucesso!');
+
+      setApiLog(prev => prev + '\n✅ Notificações enviadas com sucesso!');
 
       // Atualiza o status de todas as solicitações
       const updates = validRequests.map(request => ({
@@ -518,11 +541,11 @@ ${message}`;
         sent_at: new Date().toISOString()
       }));
 
-      const { error } = await supabase
+      const { error: upsertError } = await supabase
         .from('quotation_requests')
         .upsert(updates);
 
-      if (error) throw error;
+      if (upsertError) throw upsertError;
 
       customToast.success('Mensagens enviadas com sucesso');
       await loadQuotationDetails();

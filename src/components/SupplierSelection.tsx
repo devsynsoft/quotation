@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Loader2, Search, Send } from 'lucide-react';
-import { sendBulkWhatsAppMessages } from '../services/evolutionApi';
+import { sendNotification } from '../services/notificationWebhook';
 import { customToast, hotToast } from '../lib/toast';
 
 interface Supplier {
@@ -41,6 +41,7 @@ const SupplierSelection: React.FC<SupplierSelectionProps> = ({
   const [loading, setLoading] = useState(true);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [selectedSuppliers, setSelectedSuppliers] = useState<string[]>([]);
+  const [selectedSuppliersDetails, setSelectedSuppliersDetails] = useState<Record<string, Supplier>>({});
   const [messageTemplate, setMessageTemplate] = useState('');
   const [coverImage, setCoverImage] = useState<string | null>(null);
   const [filters, setFilters] = useState({
@@ -153,22 +154,49 @@ Quantidade: ${part.quantity}`
     loadSuppliers();
   }, [filters]);
 
+  useEffect(() => {
+    setSelectedSuppliersDetails(prev => {
+      let hasChanges = false;
+      const updated = { ...prev };
+
+      suppliers.forEach(supplier => {
+        if (selectedSuppliers.includes(supplier.id) && !updated[supplier.id]) {
+          hasChanges = true;
+          updated[supplier.id] = supplier;
+        }
+      });
+
+      return hasChanges ? updated : prev;
+    });
+  }, [suppliers, selectedSuppliers]);
+
   const toggleSupplier = (supplierId: string) => {
-    setSelectedSuppliers(prev =>
-      prev.includes(supplierId)
-        ? prev.filter(id => id !== supplierId)
-        : [...prev, supplierId]
-    );
+    setSelectedSuppliers(prev => {
+      const isSelected = prev.includes(supplierId);
+
+      if (isSelected) {
+        setSelectedSuppliersDetails(prevDetails => {
+          const { [supplierId]: _, ...rest } = prevDetails;
+          return rest;
+        });
+        return prev.filter(id => id !== supplierId);
+      }
+
+      const supplierData = suppliers.find(supplier => supplier.id === supplierId);
+      if (supplierData) {
+        setSelectedSuppliersDetails(prevDetails => ({
+          ...prevDetails,
+          [supplierId]: supplierData
+        }));
+      }
+
+      return [...prev, supplierId];
+    });
   };
 
   const sendQuotationRequests = async () => {
     if (!quotationId) {
       customToast.error('ID da cotação não encontrado');
-      return;
-    }
-
-    if (!messageTemplate.trim()) {
-      customToast.error('Por favor, defina a mensagem que será enviada');
       return;
     }
 
@@ -181,20 +209,49 @@ Quantidade: ${part.quantity}`
       setSending(true);
       const toastId = customToast.loading('Enviando solicitações...');
 
-      // Verifica se todos os fornecedores têm telefone
-      const validSuppliers = suppliers.filter(supplier => 
-        selectedSuppliers.includes(supplier.id) && 
-        supplier.area_code && 
-        supplier.phone && 
-        supplier.phone.trim() !== ''
-      );
+      let supplierDetailsMap = { ...selectedSuppliersDetails };
 
-      if (validSuppliers.length === 0) {
-        throw new Error('Nenhuma mensagem válida para enviar. Verifique se os fornecedores têm DDD e telefone cadastrados.');
+      const missingSupplierIds = selectedSuppliers.filter(id => !supplierDetailsMap[id]);
+      if (missingSupplierIds.length > 0) {
+        const { data: missingSuppliers, error: loadMissingError } = await supabase
+          .from('suppliers')
+          .select('*')
+          .in('id', missingSupplierIds);
+
+        if (loadMissingError) throw loadMissingError;
+
+        if (missingSuppliers && missingSuppliers.length > 0) {
+          const formatted = (missingSuppliers as Supplier[]).reduce<Record<string, Supplier>>((acc, supplier) => {
+            acc[supplier.id] = supplier;
+            return acc;
+          }, {});
+
+          supplierDetailsMap = {
+            ...supplierDetailsMap,
+            ...formatted
+          };
+
+          setSelectedSuppliersDetails(prev => ({
+            ...prev,
+            ...formatted
+          }));
+        }
+      }
+
+      const selectedSuppliersData = selectedSuppliers
+        .map(id => supplierDetailsMap[id])
+        .filter((supplier): supplier is Supplier => Boolean(supplier));
+
+      if (selectedSuppliersData.length === 0) {
+        throw new Error('Nenhum fornecedor selecionado.');
+      }
+
+      if (selectedSuppliersData.length !== selectedSuppliers.length) {
+        throw new Error('Não foi possível carregar todos os fornecedores selecionados.');
       }
 
       // Prepara os dados das solicitações
-      const requests = validSuppliers.map(supplier => ({
+      const requests = selectedSuppliersData.map(supplier => ({
         quotation_id: quotationId,
         supplier_id: supplier.id,
         status: 'pending',
@@ -209,28 +266,60 @@ Quantidade: ${part.quantity}`
 
       if (requestError) throw requestError;
 
-      // Prepara e envia as mensagens WhatsApp
-      const messages = validSuppliers.map(supplier => {
-        const request = insertedRequests?.find(r => r.supplier_id === supplier.id);
-        
-        let message = messageTemplate;
-        // Adiciona o link no formato correto
-        message += `{quotation_link}${window.location.origin}/quotation-response/${quotationId}/${request?.id}`;
+      // Prepara e envia as mensagens
+      const partsText = parts.map(part => 
+        `⭕ ${part.description}
+Cod. Peça: ${part.code || '-'}
+Quantidade: ${part.quantity}`
+      ).join('\n\n');
 
-        return { 
-          areaCode: supplier.area_code,
-          phone: supplier.phone,
-          message,
-          imageUrl: coverImage || undefined,
-          documentUrl: undefined,
-          useTemplates: true
+      const vehiclePayload = {
+        brand: vehicleDetails.marca || null,
+        model: vehicleDetails.modelo || null,
+        year: vehicleDetails.ano || null,
+        chassis: vehicleDetails.chassis || null
+      };
+
+      const requestPayloads = selectedSuppliersData.map(supplier => {
+        const request = insertedRequests?.find(r => r.supplier_id === supplier.id);
+        if (!request?.id) {
+          throw new Error(`Não foi possível criar a solicitação para o fornecedor ${supplier.name}`);
+        }
+
+        const supplierLink = `${window.location.origin}/quotation-response/${quotationId}/${request.id}`;
+
+        return {
+          request_id: request.id,
+          supplier: {
+            id: supplier.id,
+            name: supplier.name || null,
+            phone: supplier.phone || null,
+            area_code: supplier.area_code || null
+          },
+          supplier_link: supplierLink,
+          parts: parts.map(part => ({
+            operation: part.operation || '',
+            code: part.code || '',
+            description: part.description,
+            part_type: part.part_type || '',
+            quantity: part.quantity,
+            painting_hours: part.painting_hours
+          })),
+          parts_text: partsText,
+          cover_image: coverImage || null
         };
       });
 
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Usuário não autenticado');
+      const payload = {
+        quotation_id: quotationId,
+        vehicle: vehiclePayload,
+        requests: requestPayloads
+      };
 
-      await sendBulkWhatsAppMessages(messages, user.id);
+      const { success, error } = await sendNotification(payload);
+      if (!success) {
+        throw (error || new Error('Falha ao enviar dados ao webhook'));
+      }
 
       hotToast.dismiss(toastId);
       customToast.success('Solicitações enviadas com sucesso!');
@@ -250,28 +339,45 @@ Quantidade: ${part.quantity}`
   };
 
   const handleSelectAll = () => {
-    const allSelected = suppliers.every(supplier => 
-      selectedSuppliers.includes(supplier.id)
-    );
-    
-    if (allSelected) {
-      // Se todos já estão selecionados, desmarca apenas os fornecedores atualmente filtrados
-      const newSelectedSuppliers = selectedSuppliers.filter(
-        id => !suppliers.some(supplier => supplier.id === id)
-      );
-      setSelectedSuppliers(newSelectedSuppliers);
-    } else {
-      // Senão, adiciona os fornecedores filtrados aos já selecionados
-      const supplierIdsToAdd = suppliers
-        .filter(supplier => !selectedSuppliers.includes(supplier.id))
-        .map(supplier => supplier.id);
-      
-      setSelectedSuppliers([...selectedSuppliers, ...supplierIdsToAdd]);
-    }
+    const filteredIds = suppliers.map(supplier => supplier.id);
+
+    setSelectedSuppliers(prev => {
+      const allSelected = filteredIds.every(id => prev.includes(id));
+
+      if (allSelected) {
+        setSelectedSuppliersDetails(prevDetails => {
+          const updated = { ...prevDetails };
+          filteredIds.forEach(id => {
+            delete updated[id];
+          });
+          return updated;
+        });
+
+        return prev.filter(id => !filteredIds.includes(id));
+      }
+
+      const newIds = filteredIds.filter(id => !prev.includes(id));
+      if (newIds.length === 0) {
+        return prev;
+      }
+
+      setSelectedSuppliersDetails(prevDetails => {
+        const updated = { ...prevDetails };
+        suppliers.forEach(supplier => {
+          if (filteredIds.includes(supplier.id)) {
+            updated[supplier.id] = supplier;
+          }
+        });
+        return updated;
+      });
+
+      return [...prev, ...newIds];
+    });
   };
 
   const handleClearSelection = () => {
     setSelectedSuppliers([]);
+    setSelectedSuppliersDetails({});
   };
 
   return (

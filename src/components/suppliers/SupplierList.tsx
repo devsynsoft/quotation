@@ -1,6 +1,5 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
-import { Plus, Search, X, Trash2, Loader2, MessageCircle } from 'lucide-react';
+import { Plus, Search, X, Trash2, Loader2, MessageCircle, Star } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { Database } from '../../lib/database.types';
 import { AddSupplierModal } from './AddSupplierModal';
@@ -16,6 +15,7 @@ type Filter = {
   city: string;
   specialization: string;
   searchTerm: string;
+  is_favorite: string;
 };
 
 export function SupplierList() {
@@ -32,7 +32,8 @@ export function SupplierList() {
     state: '',
     city: '',
     specialization: '',
-    searchTerm: ''
+    searchTerm: '',
+    is_favorite: ''
   });
   const [importing, setImporting] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -99,6 +100,9 @@ export function SupplierList() {
       if (filters.specialization) {
         query = query.eq('specialization', filters.specialization);
       }
+      if (filters.is_favorite === 'true') {
+        query = query.eq('is_favorite', true);
+      }
 
       const { data, error } = await query;
 
@@ -145,8 +149,36 @@ export function SupplierList() {
       state: '',
       city: '',
       specialization: '',
-      searchTerm: ''
+      searchTerm: '',
+      is_favorite: ''
     });
+  }
+
+  async function handleToggleFavorite(e: React.MouseEvent, supplier: Supplier) {
+    e.stopPropagation();
+    
+    try {
+      const newFavoriteStatus = !supplier.is_favorite;
+      
+      const { error } = await supabase
+        .from('suppliers')
+        .update({ is_favorite: newFavoriteStatus })
+        .eq('id', supplier.id);
+
+      if (error) throw error;
+
+      setSuppliers(prev => prev.map(s => 
+        s.id === supplier.id ? { ...s, is_favorite: newFavoriteStatus } : s
+      ));
+      setFilteredSuppliers(prev => prev.map(s => 
+        s.id === supplier.id ? { ...s, is_favorite: newFavoriteStatus } : s
+      ));
+
+      toast.success(newFavoriteStatus ? 'Fornecedor favoritado!' : 'Fornecedor removido dos favoritos');
+    } catch (err) {
+      console.error('Erro ao atualizar favorito:', err);
+      toast.error('Erro ao atualizar favorito');
+    }
   }
 
   function handleEdit(supplier: Supplier) {
@@ -468,7 +500,21 @@ export function SupplierList() {
             </select>
           </div>
 
-          {(filters.area_code || filters.parts_type || filters.state || filters.city || filters.specialization) && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Favoritos
+            </label>
+            <select
+              value={filters.is_favorite}
+              onChange={e => handleFilterChange('is_favorite', e.target.value)}
+              className="w-full pl-4 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50"
+            >
+              <option value="">Todos</option>
+              <option value="true">Apenas favoritos</option>
+            </select>
+          </div>
+
+          {(filters.area_code || filters.parts_type || filters.state || filters.city || filters.specialization || filters.is_favorite) && (
             <div className="mt-4 flex justify-end">
               <button
                 onClick={clearFilters}
@@ -501,10 +547,19 @@ export function SupplierList() {
           {filteredSuppliers.map(supplier => (
             <div
               key={supplier.id}
-              className="bg-white p-4 rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+              className="bg-white p-4 rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer relative"
               onClick={() => handleEdit(supplier)}
             >
-              <h3 className="font-semibold text-lg mb-2">{supplier.name.toUpperCase()}</h3>
+              <button
+                onClick={(e) => handleToggleFavorite(e, supplier)}
+                className="absolute top-2 right-2 p-1 hover:bg-yellow-100 rounded-full transition-colors"
+                title={supplier.is_favorite ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}
+              >
+                <Star 
+                  className={`h-5 w-5 ${supplier.is_favorite ? 'text-yellow-500 fill-yellow-500' : 'text-gray-300'}`} 
+                />
+              </button>
+              <h3 className="font-semibold text-lg mb-2 pr-8">{supplier.name.toUpperCase()}</h3>
               <p className="text-gray-600 text-sm mb-1">
                 {supplier.area_code} {supplier.phone}
               </p>

@@ -353,6 +353,7 @@ export interface Database {
           specialization: string
           user_id: string
           created_at: string
+          is_favorite: boolean
         }
         Insert: {
           id?: string
@@ -370,6 +371,7 @@ export interface Database {
           specialization: string
           user_id: string
           created_at?: string
+          is_favorite?: boolean
         }
         Update: {
           id?: string
@@ -387,6 +389,7 @@ export interface Database {
           specialization?: string
           user_id?: string
           created_at?: string
+          is_favorite?: boolean
         }
         Relationships: [
           {

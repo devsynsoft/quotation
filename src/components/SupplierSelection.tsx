@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { Loader2, Search, Send } from 'lucide-react';
+import { Loader2, Search, Send, Star } from 'lucide-react';
 import { sendNotification } from '../services/notificationWebhook';
 import { customToast, hotToast } from '../lib/toast';
 
@@ -14,6 +14,7 @@ interface Supplier {
   state: string;
   categories?: string[];
   vehicle_type?: string;
+  is_favorite?: boolean;
 }
 
 interface SupplierSelectionProps {
@@ -50,7 +51,8 @@ const SupplierSelection: React.FC<SupplierSelectionProps> = ({
     state: '',
     part_type: '',
     specialization: '',
-    name: ''
+    name: '',
+    is_favorite: ''
   });
   const [sending, setSending] = useState(false);
 
@@ -123,6 +125,9 @@ Quantidade: ${part.quantity}`
       }
       if (filters.specialization && filters.specialization !== '') {
         query = query.eq('specialization', filters.specialization);
+      }
+      if (filters.is_favorite === 'true') {
+        query = query.eq('is_favorite', true);
       }
 
       const { data, error } = await query;
@@ -502,6 +507,18 @@ Quantidade: ${part.quantity}`
               <option value="all">Todos</option>
             </select>
           </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Favoritos</label>
+            <select
+              value={filters.is_favorite}
+              onChange={e => setFilters(prev => ({ ...prev, is_favorite: e.target.value }))}
+              className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+            >
+              <option value="">Todos</option>
+              <option value="true">Apenas favoritos</option>
+            </select>
+          </div>
         </div>
 
         {/* Lista de Fornecedores */}
@@ -560,11 +577,16 @@ Quantidade: ${part.quantity}`
                   }`}
                   onClick={() => toggleSupplier(supplier.id)}
                 >
-                  <div>
-                    <p className="font-medium">{supplier.name}</p>
-                    <p className="text-sm text-gray-500">
-                      {supplier.city}, {supplier.state} ({supplier.area_code}) {supplier.phone}
-                    </p>
+                  <div className="flex items-center gap-2">
+                    {supplier.is_favorite && (
+                      <Star className="h-4 w-4 text-yellow-500 fill-yellow-500 flex-shrink-0" />
+                    )}
+                    <div>
+                      <p className="font-medium">{supplier.name}</p>
+                      <p className="text-sm text-gray-500">
+                        {supplier.city}, {supplier.state} ({supplier.area_code}) {supplier.phone}
+                      </p>
+                    </div>
                   </div>
                   <div onClick={(e) => e.stopPropagation()}>
                     <input

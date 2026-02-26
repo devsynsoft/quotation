@@ -1,4 +1,4 @@
-const WEBHOOK_URL = "https://webhook.synsoft.com.br/webhook/ce0f0fa6-34b8-477d-898c-1a8c5e05ef9c";
+const WEBHOOK_URL = "https://webhook.synsoft.com.br/webhook/enviopecasce0f0fa6-34b8-477d-898c-1a8c5e05ef9c";
 
 type WebhookSupplier = {
   id: string;
